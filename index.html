@@ -1311,18 +1311,38 @@ const MATERIALES_ROPA = [
   "Viscosa", "Chifón", "Encaje", "Punto (jersey)", "Lana", "Franela", "Terciopelo", "Satín", "Cuero sintético",
 ];
 const MATERIALES_CALZADO = ["Cuero genuino", "Cuero sintético (PU)", "Gamuza", "Charol", "Lona / Tela", "Malla", "Sintético", "Goma / Caucho"];
-const MATERIALES_POR_CATEGORIA = {
-  "Blusas": MATERIALES_ROPA,
-  "Vestidos": MATERIALES_ROPA,
-  "Pantalones": MATERIALES_ROPA,
-  "Zapatos": MATERIALES_CALZADO,
-  "Tacones": MATERIALES_CALZADO,
-  "Carteras": ["Cuero genuino", "Cuero sintético", "Lona", "Nylon", "Yute", "Sintético"],
-  "Maquillaje": ["Polvo", "Líquido", "Crema", "Gel", "Barra / Stick", "Aerosol / Spray"],
-  "Tecnología": ["Plástico (ABS/Policarbonato)", "Metal (aluminio)", "Vidrio templado", "Silicona", "Fibra de carbono", "Cuero sintético"],
+
+/* Cada categoría tiene un "tipo de producto" (elegido al crearla) que define sus
+   medidas/materiales — así una categoría nueva (Chaquetas, Ropa de hombre, etc.)
+   funciona sola con tal de marcarle el tipo correcto, sin tocar código. */
+const TIPOS_PRODUCTO = [
+  ["ropa", "Ropa"], ["calzado", "Calzado"], ["bolsos", "Bolsos y carteras"],
+  ["belleza", "Belleza / Maquillaje"], ["tecnologia", "Tecnología"], ["otro", "Otro"],
+];
+function inferirTipoCategoria(nombre) {
+  const n = (nombre || "").toLowerCase();
+  if (/(zapato|tac[oó]n|sandalia|bota|calzado)/.test(n)) return "calzado";
+  if (/(cartera|bolso|mochila|maleta)/.test(n)) return "bolsos";
+  if (/(maquillaje|belleza|cosm[eé]t|perfume|skincare)/.test(n)) return "belleza";
+  if (/(tecnolog|electr[oó]n|gadget|celular|audif[oó]no)/.test(n)) return "tecnologia";
+  if (/(blusa|vestido|pantal[oó]n|falda|short|camisa|chaqueta|saco|abrigo|ropa|jean|blazer|su[eé]ter)/.test(n)) return "ropa";
+  return "otro";
+}
+function tipoDeCategoria(categoria) { return categoria?.tipo || inferirTipoCategoria(categoria?.nombre); }
+const MEDIDAS_POR_TIPO = {
+  ropa: [["busto", "Busto"], ["cintura", "Cintura"], ["cadera", "Cadera"], ["largo", "Largo"], ["manga", "Manga"]],
+  calzado: [["talla", "Talla (EU)"], ["ancho", "Ancho de horma (cm)"], ["altura_tacon", "Altura de tacón (cm)"]],
+  bolsos: [["ancho", "Ancho (cm)"], ["alto", "Alto (cm)"], ["profundidad", "Profundidad (cm)"]],
 };
-function medidasFieldsHtml(categoriaNombre, medidas) {
-  const campos = MEDIDAS_POR_CATEGORIA[categoriaNombre];
+const MATERIALES_POR_TIPO = {
+  ropa: MATERIALES_ROPA,
+  calzado: MATERIALES_CALZADO,
+  bolsos: ["Cuero genuino", "Cuero sintético", "Lona", "Nylon", "Yute", "Sintético"],
+  belleza: ["Polvo", "Líquido", "Crema", "Gel", "Barra / Stick", "Aerosol / Spray"],
+  tecnologia: ["Plástico (ABS/Policarbonato)", "Metal (aluminio)", "Vidrio templado", "Silicona", "Fibra de carbono", "Cuero sintético"],
+};
+function medidasFieldsHtml(tipoProducto, medidas) {
+  const campos = MEDIDAS_POR_TIPO[tipoProducto];
   if (!campos) return "";
   return `
     <div class="field">
@@ -1358,8 +1378,9 @@ function renderProductModal() {
   const val = (field, def) => (st[field] !== undefined ? st[field] : (p ? p[field] : def)) ?? def;
   const medidas = st.medidas || p?.medidas || {};
   const categoryId = val("category_id", p?.category_id ?? DB.categories[0]?.id);
-  const categoriaNombre = findById("categories", categoryId)?.nombre || "";
-  const materialOpciones = MATERIALES_POR_CATEGORIA[categoriaNombre] || [];
+  const categoriaObj = findById("categories", categoryId);
+  const tipoProducto = tipoDeCategoria(categoriaObj);
+  const materialOpciones = MATERIALES_POR_TIPO[tipoProducto] || [];
   const materialActual = val("material", "");
   const materialEsOtro = !!materialActual && !materialOpciones.includes(materialActual);
   openModal(`
@@ -1417,7 +1438,7 @@ function renderProductModal() {
       </div>
     </div>
     <div class="field"><label class="flabel">Descripción</label><textarea id="pm_descripcion" rows="2">${esc(val("descripcion", ""))}</textarea></div>
-    ${medidasFieldsHtml(categoriaNombre, medidas)}
+    ${medidasFieldsHtml(tipoProducto, medidas)}
     <div class="field-row">
       <div class="field">
         <label class="flabel">Colores disponibles</label>
@@ -1494,11 +1515,14 @@ route("/admin/categorias", () => {
   const rows = DB.categories.map((c) => `
     <div class="flex justify-between items-center" style="padding:14px 16px;border-top:1px solid var(--border);">
       ${editingCategoryId === c.id ? `
-        <div class="flex items-center gap-2">
-          <input id="cat_edit_${c.id}" value="${esc(c.nombre)}" style="width:200px;">
+        <div class="flex items-center gap-2 flex-wrap">
+          <input id="cat_edit_${c.id}" value="${esc(c.nombre)}" style="width:160px;">
+          <select id="cat_edit_tipo_${c.id}" style="width:auto;">
+            ${TIPOS_PRODUCTO.map(([v, l]) => `<option value="${v}" ${tipoDeCategoria(c) === v ? "selected" : ""}>${l}</option>`).join("")}
+          </select>
           <button class="btn-link" style="color:var(--rose);" onclick="saveCategoryName('${c.id}')">Guardar</button>
           <button class="btn-link" onclick="editingCategoryId=null;renderRoute();">Cancelar</button>
-        </div>` : `<button class="btn-link" style="font-weight:700;" onclick="editingCategoryId='${c.id}';renderRoute();">${esc(c.nombre)}</button>`}
+        </div>` : `<button class="btn-link" style="font-weight:700;" onclick="editingCategoryId='${c.id}';renderRoute();">${esc(c.nombre)} <span class="muted" style="font-size:11px;font-weight:400;">(${(TIPOS_PRODUCTO.find(([v]) => v === tipoDeCategoria(c)) || [])[1] || ""})</span></button>`}
       <div class="flex items-center gap-3">
         <button class="badge ${c.activa ? "badge-ok" : "badge-low"}" onclick="toggleCategoria('${c.id}')">${c.activa ? "Activa" : "Desactivada"}</button>
         <button class="btn-danger-text" onclick="deleteCategoria('${c.id}')">Eliminar</button>
@@ -1507,13 +1531,17 @@ route("/admin/categorias", () => {
   return adminLayout("#/admin/categorias", "Catálogo", "Categorías", `
     <button class="btn btn-navy mb-4" onclick="openNewCategoryModal()">+ Nueva categoría</button>
     <div class="table-wrap" style="border-radius:var(--radius);">${rows || `<p class="muted text-center" style="padding:40px;">Sin categorías todavía.</p>`}</div>
-    <p class="muted mt-3" style="font-size:12px;">Hacé clic en el nombre para renombrarla, o usá el botón de estado para activar/desactivarla en la tienda pública.</p>
+    <p class="muted mt-3" style="font-size:12px;">Hacé clic en el nombre para renombrarla o cambiar su tipo de producto, o usá el botón de estado para activar/desactivarla en la tienda pública.</p>
   `);
 });
 function openNewCategoryModal() {
   openModal(`
     <h3>Nueva categoría</h3>
     <div class="field"><label class="flabel">Nombre</label><input id="newcat_nombre" placeholder="Ej. Accesorios"></div>
+    <div class="field"><label class="flabel">Tipo de producto</label>
+      <select id="newcat_tipo">${TIPOS_PRODUCTO.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select>
+      <p class="muted" style="font-size:11px;margin-top:4px;">Define qué medidas y materiales aparecen al crear productos de esta categoría.</p>
+    </div>
     <div class="field"><label class="flabel">Imagen (URL, opcional)</label><input id="newcat_img" placeholder="https://..."></div>
     <div class="modal-actions">
       <button class="btn btn-rose" onclick="saveNewCategory()">Guardar</button>
@@ -1523,14 +1551,16 @@ function openNewCategoryModal() {
 function saveNewCategory() {
   const nombre = document.getElementById("newcat_nombre").value.trim();
   if (!nombre) { toast("Escribe un nombre"); return; }
+  const tipo = document.getElementById("newcat_tipo").value;
   const img = document.getElementById("newcat_img").value.trim();
-  crudInsert("categories", { nombre, slug: slugify(nombre), imagen_url: img || "data:image/png;base64,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QghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKT9He09o62xKyCcAAAAAElFTkSuQmCC", activa: true, orden: DB.categories.length + 1 });
+  crudInsert("categories", { nombre, slug: slugify(nombre), tipo, imagen_url: img || "data:image/png;base64,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QghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKT9He09o62xKyCcAAAAAElFTkSuQmCC", activa: true, orden: DB.categories.length + 1 });
   closeModal(); toast("Categoría creada"); renderRoute();
 }
 function saveCategoryName(id) {
   const v = document.getElementById("cat_edit_" + id).value.trim();
   if (!v) return;
-  crudUpdate("categories", id, { nombre: v, slug: slugify(v) });
+  const tipo = document.getElementById("cat_edit_tipo_" + id).value;
+  crudUpdate("categories", id, { nombre: v, slug: slugify(v), tipo });
   editingCategoryId = null; toast("Categoría actualizada"); renderRoute();
 }
 function toggleCategoria(id) { const c = findById("categories", id); crudUpdate("categories", id, { activa: !c.activa }); renderRoute(); }
