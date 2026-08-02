@@ -346,6 +346,7 @@ tbody tr:first-child td { border-top: none; }
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -369,6 +370,20 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
+
+/* ---------------- EMAILJS (avisos por correo al dueño) ---------------- */
+const EMAILJS_PUBLIC_KEY = "Srh8WLMphkar-8aNr";
+const EMAILJS_SERVICE_ID = "service_mwmzhnq";
+const EMAILJS_TEMPLATE_ID = "template_1fb41hz";
+emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+const METODO_PAGO_TEXTOS = {
+  transferencia: "Transferencia bancaria", deposito: "Depósito a cuenta",
+  efectivo_entrega: "Efectivo al entregar", efectivo_punto: "Efectivo en punto de entrega",
+};
+function sendOrderEmail(titulo, mensaje, ctx) {
+  emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, { titulo, mensaje, ...ctx })
+    .catch((e) => console.error("emailjs", e));
+}
 const db = firebase.firestore();
 
 /* ---------------- UTILIDADES ---------------- */
@@ -1075,9 +1090,23 @@ async function pdSubmit(e, productId) {
     if (st.comprobante) {
       crudInsert("payment_proofs", { reservation_id: reservation.id, archivo_url: st.comprobante, monto_esperado: total, estado: "pendiente" });
     }
-    addNotification("nueva_reserva", "Nueva reserva recibida", `${st.nombre} reservó "${product.nombre}" — orden ${numeroOrden}`, { reservation_id: reservation.id, product_id: product.id });
+
+    const emailCtx = {
+      cliente_nombre: st.nombre, cliente_whatsapp: st.whatsapp, producto_nombre: product.nombre,
+      tipo_entrega_texto: entrega.esInmediato ? "Entrega inmediata" : `Reserva (recibe el ${st.fechaEntrega})`,
+      zona_entrega: zona?.nombre || "—", metodo_pago_texto: METODO_PAGO_TEXTOS[st.metodoPago] || st.metodoPago,
+      detalle_pago: entrega.esInmediato
+        ? `Paga 100% ahora (${money(total)})`
+        : `Anticipo 50%: ${money(entrega.montoReserva)} · Saldo al recibir: ${money(total - entrega.montoReserva)}`,
+      numero_orden: numeroOrden,
+    };
+    const mensajeReserva = `${st.nombre} reservó "${product.nombre}" — orden ${numeroOrden}`;
+    addNotification("nueva_reserva", "Nueva reserva recibida", mensajeReserva, { reservation_id: reservation.id, product_id: product.id });
+    sendOrderEmail("Nueva reserva recibida", mensajeReserva, emailCtx);
     if (st.comprobante) {
-      addNotification("comprobante_subido", "Comprobante recibido", `${st.nombre} subió un comprobante para la orden ${numeroOrden}`, { reservation_id: reservation.id, product_id: product.id });
+      const mensajeComprobante = `${st.nombre} subió un comprobante para la orden ${numeroOrden}`;
+      addNotification("comprobante_subido", "Comprobante recibido", mensajeComprobante, { reservation_id: reservation.id, product_id: product.id });
+      sendOrderEmail("Comprobante recibido", mensajeComprobante, emailCtx);
     }
 
     st.submitting = false;
