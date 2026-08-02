@@ -803,6 +803,7 @@ function ensurePdState(product) {
       productId: product.id, activeMedia: 0, zoomed: false,
       talla: product.tallas?.[0] || "", color: product.colores?.[0] || "",
       zonaId: DB.delivery_zones.find((z) => z.activa)?.id || "",
+      fechaEntrega: todayStr(),
       metodoPago: "transferencia", comprobante: null, comprobanteNombre: "",
       nombre: "", whatsapp: "", correo: "", direccion: "",
       submitting: false, errorMsg: "", result: null,
@@ -816,6 +817,14 @@ function stockStateOf(p) {
   if (p.estado === "reservado") return { label: "Reservado", cls: "reservado" };
   if (stock <= 3) return { label: "Últimas unidades", cls: "ultimas" };
   return { label: "En stock", cls: "en-stock" };
+}
+function tipoEntregaInfo(fechaEntrega, precioVenta) {
+  const hoy = new Date(todayStr() + "T00:00:00");
+  const elegida = new Date((fechaEntrega || todayStr()) + "T00:00:00");
+  const diffDias = Math.round((elegida - hoy) / 86400000);
+  const esInmediato = diffDias <= 1;
+  const montoReserva = esInmediato ? 0 : +(precioVenta * 0.5).toFixed(2);
+  return { esInmediato, diffDias, montoReserva };
 }
 
 route("/producto/:slug", ({ slug }) => {
@@ -846,11 +855,15 @@ function productReceiptView(product, st) {
           <div class="detail-row"><span>Zona de entrega</span><b>${esc(r.zona_nombre || "")}</b></div>
           <div class="detail-row" style="border-top:1px solid var(--border);padding-top:10px;margin-top:6px;"><span>Precio del producto</span><b>${money(r.precio_producto)}</b></div>
           <div class="detail-row"><span>Delivery</span><b>${money(r.costo_delivery)}</b></div>
-          <div class="detail-row"><span>Anticipo sugerido (30%)</span><b>${money(r.monto_reserva)}</b></div>
-          <div class="detail-row total"><span>Total a transferir</span><span class="price">${money(r.total_a_pagar)}</span></div>
+          ${r.tipo_entrega === "inmediato" ? "" : `
+          <div class="detail-row"><span>Anticipo (50%)</span><b>${money(r.monto_reserva)}</b></div>
+          <div class="detail-row"><span>Saldo al recibir</span><b>${money(r.total_a_pagar - r.monto_reserva)}</b></div>`}
+          <div class="detail-row total"><span>${r.tipo_entrega === "inmediato" ? "Total a pagar" : "Total del pedido"}</span><span class="price">${money(r.total_a_pagar)}</span></div>
         </div>
         <p class="muted" style="font-size:12px;margin-top:16px;">
-          ${r.comprobante_url ? "Recibimos tu comprobante — lo revisaremos pronto." : "Tienes 24 horas para completar el pago o el producto vuelve al stock disponible."}
+          ${r.tipo_entrega === "inmediato"
+            ? "Es una entrega inmediata: coordina el pago del total al recibir o envía tu comprobante."
+            : (r.comprobante_url ? "Recibimos tu comprobante del anticipo — lo revisaremos pronto." : "Tienes 24 horas para completar el anticipo o el producto vuelve al stock disponible.")}
         </p>
         <a href="#/" class="btn btn-ghost btn-pill" style="margin-top:20px;">Seguir viendo el catálogo</a>
       </div>
@@ -860,7 +873,7 @@ function productReceiptView(product, st) {
 
 function productFormView(product, st) {
   const zona = DB.delivery_zones.find((z) => z.id === st.zonaId);
-  const montoReserva = +(product.precio_venta * 0.3).toFixed(2);
+  const entrega = tipoEntregaInfo(st.fechaEntrega, product.precio_venta);
   const total = +(product.precio_venta + (zona?.costo || 0)).toFixed(2);
   const stockInfo = stockStateOf(product);
   const media = product.media?.length ? product.media : [{ url: "data:image/png;base64,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QghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKT9He09o62xKyCcAAAAAElFTkSuQmCC", tipo: "imagen", vista: null }];
@@ -936,6 +949,12 @@ function productFormView(product, st) {
           </div>
 
           <div class="field">
+            <label class="flabel">¿Cuándo lo vas a recibir?</label>
+            <input type="date" min="${todayStr()}" value="${esc(st.fechaEntrega || todayStr())}" onchange="pdSetField('fechaEntrega', this.value)">
+            <p class="muted" style="font-size:12px;margin-top:4px;">${entrega.esInmediato ? "Entrega inmediata: pagas el total ahora." : "Reserva: pagas 50% de anticipo ahora y el resto al recibir."}</p>
+          </div>
+
+          <div class="field">
             <label class="flabel">Método de pago</label>
             <select onchange="pdSetField('metodoPago', this.value)">
               <option value="transferencia" ${st.metodoPago === "transferencia" ? "selected" : ""}>Transferencia bancaria</option>
@@ -974,16 +993,18 @@ function productFormView(product, st) {
           <div class="surface2" style="font-size:14px;">
             <div class="flex justify-between"><span>Precio del producto</span><b>${money(product.precio_venta)}</b></div>
             <div class="flex justify-between mt-1"><span>Delivery (${esc(zona?.nombre || "")})</span><b>${money(zona?.costo || 0)}</b></div>
-            <div class="flex justify-between mt-1"><span>Anticipo sugerido (30%)</span><b>${money(montoReserva)}</b></div>
-            <div class="flex justify-between mt-2" style="padding-top:8px;border-top:1px solid var(--border);font-weight:800;font-size:16px;"><span>Total a pagar</span><span class="price">${money(total)}</span></div>
+            ${entrega.esInmediato ? "" : `
+            <div class="flex justify-between mt-1"><span>Anticipo (50%)</span><b>${money(entrega.montoReserva)}</b></div>
+            <div class="flex justify-between mt-1"><span>Saldo al recibir</span><b>${money(total - entrega.montoReserva)}</b></div>`}
+            <div class="flex justify-between mt-2" style="padding-top:8px;border-top:1px solid var(--border);font-weight:800;font-size:16px;"><span>${entrega.esInmediato ? "Total a pagar ahora" : "Total del pedido"}</span><span class="price">${money(total)}</span></div>
           </div>
 
           ${st.errorMsg ? `<p style="color:var(--danger);font-size:13px;margin-top:10px;">${esc(st.errorMsg)}</p>` : ""}
 
           <button class="btn btn-rose btn-full" style="margin-top:16px;" ${st.submitting || agotado ? "disabled" : ""}>
-            ${agotado ? "Producto agotado" : st.submitting ? "Enviando..." : "Reservar ahora"}
+            ${agotado ? "Producto agotado" : st.submitting ? "Enviando..." : (entrega.esInmediato ? "Confirmar pedido" : "Reservar ahora")}
           </button>
-          <p class="muted" style="font-size:11px;text-align:center;margin-top:8px;">La reserva se mantiene activa por 24 horas mientras se confirma el pago.</p>
+          <p class="muted" style="font-size:11px;text-align:center;margin-top:8px;">${entrega.esInmediato ? "Tu pedido se procesa de inmediato al confirmar el pago." : "La reserva se mantiene activa por 24 horas mientras se confirma el anticipo."}</p>
         </form>
       </div>
     </div>
@@ -1013,7 +1034,7 @@ async function pdSubmit(e, productId) {
 
   const zona = DB.delivery_zones.find((z) => z.id === st.zonaId);
   const costoDelivery = zona?.costo || 0;
-  const montoReserva = +(product.precio_venta * 0.3).toFixed(2);
+  const entrega = tipoEntregaInfo(st.fechaEntrega, product.precio_venta);
   const total = +(product.precio_venta + costoDelivery).toFixed(2);
   const numeroOrden = `NH-${new Date().getFullYear()}-${String(DB.reservations.length + 1).padStart(6, "0")}`;
 
@@ -1024,7 +1045,8 @@ async function pdSubmit(e, productId) {
       product_id: product.id, producto_nombre: product.nombre, talla: st.talla || null, color: st.color || null,
       cantidad: 1, delivery_zone_id: st.zonaId || null, zona_nombre: zona?.nombre || null,
       precio_producto: product.precio_venta, costo_producto: product.costo_compra,
-      monto_reserva: montoReserva, costo_delivery: costoDelivery, total_a_pagar: total,
+      monto_reserva: entrega.montoReserva, tipo_entrega: entrega.esInmediato ? "inmediato" : "reserva",
+      fecha_entrega: st.fechaEntrega || null, costo_delivery: costoDelivery, total_a_pagar: total,
       metodo_pago: st.metodoPago, comprobante_url: st.comprobante || null,
       estado: st.comprobante ? "comprobante_recibido" : "pendiente", origen: "web",
       created_at: nowISO(), expira_at: new Date(Date.now() + 24 * 3600000).toISOString(),
@@ -1481,6 +1503,7 @@ const ESTADO_RESERVA_BADGE = {
   pendiente_entrega: "badge-warn", entregado: "badge-ok", expirado: "badge-out",
   liberado_al_stock: "badge-low", cancelado: "badge-out",
 };
+const RESERVA_ESTADOS_FINALES = ["entregado", "cancelado", "expirado", "liberado_al_stock"];
 route("/admin/reservas", () => {
   const reservas = [...DB.reservations].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   const rows = reservas.map((r) => `
@@ -1488,15 +1511,48 @@ route("/admin/reservas", () => {
       <td style="font-family:monospace;font-size:12px;">${esc(r.numero_orden)}</td>
       <td>${esc(r.cliente_nombre)}</td><td>${esc(r.producto_nombre)}</td><td>${money(r.total_a_pagar)}</td>
       <td><span class="badge ${ESTADO_RESERVA_BADGE[r.estado] || "badge-low"}">${esc((r.estado || "").replace(/_/g, " "))}</span></td>
-      <td style="font-size:12px;">${horasRestantes(r.expira_at)}</td>
+      <td style="font-size:12px;">${r.tipo_entrega === "inmediato" ? "Inmediata" : horasRestantes(r.expira_at)}</td>
+      <td class="row-actions">
+        ${RESERVA_ESTADOS_FINALES.includes(r.estado) ? "" : `
+        <button class="btn-link" style="margin-right:10px;" onclick="marcarReservaEntregada('${r.id}')">Marcar entregado</button>
+        <button class="btn-danger-text" onclick="cancelarReserva('${r.id}')">Cancelar</button>`}
+      </td>
     </tr>`).join("");
   return adminLayout("#/admin/reservas", "Órdenes en vivo", "Centro de reservas", `
     <div class="table-wrap"><table>
-      <thead><tr><th>Orden</th><th>Cliente</th><th>Producto</th><th>Total</th><th>Estado</th><th>Tiempo restante</th></tr></thead>
-      <tbody>${rows || `<tr class="empty-row"><td colspan="6">Sin reservas todavía.</td></tr>`}</tbody>
+      <thead><tr><th>Orden</th><th>Cliente</th><th>Producto</th><th>Total</th><th>Estado</th><th>Tiempo restante</th><th></th></tr></thead>
+      <tbody>${rows || `<tr class="empty-row"><td colspan="7">Sin reservas todavía.</td></tr>`}</tbody>
     </table></div>
   `);
 });
+function marcarReservaEntregada(id) {
+  if (!confirmar("¿Marcar esta reserva como entregada? Se restará del inventario.")) return;
+  const r = findById("reservations", id);
+  const p = r ? findById("products", r.product_id) : null;
+  if (p) {
+    crudUpdate("products", p.id, {
+      stock: Math.max(0, (p.stock || 0) - (r.cantidad || 1)),
+      stock_reservado: Math.max(0, (p.stock_reservado || 0) - (r.cantidad || 1)),
+    });
+  }
+  crudUpdate("reservations", id, { estado: "entregado", entregado_at: nowISO() });
+  toast("Reserva marcada como entregada");
+  renderRoute();
+}
+function cancelarReserva(id) {
+  if (!confirmar("¿Cancelar esta reserva? El producto vuelve a estar disponible.")) return;
+  const r = findById("reservations", id);
+  const p = r ? findById("products", r.product_id) : null;
+  if (p) {
+    crudUpdate("products", p.id, {
+      stock_reservado: Math.max(0, (p.stock_reservado || 0) - (r.cantidad || 1)),
+      estado: p.estado === "reservado" ? "disponible" : p.estado,
+    });
+  }
+  crudUpdate("reservations", id, { estado: "cancelado" });
+  toast("Reserva cancelada");
+  renderRoute();
+}
 
 /* ================================================================
    COMPRAS
