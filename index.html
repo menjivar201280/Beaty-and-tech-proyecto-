@@ -346,7 +346,6 @@ tbody tr:first-child td { border-top: none; }
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -371,7 +370,6 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
-const storage = firebase.storage();
 
 /* ---------------- UTILIDADES ---------------- */
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -434,14 +432,6 @@ async function compressImage(file, maxW) {
     img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
   });
-}
-async function uploadToStorage(file, folder) {
-  const isVideo = file.type.startsWith("video");
-  const dataUrl = isVideo ? await fileToDataUrl(file) : await compressImage(file, 1280);
-  const path = `${folder}/${uid()}_${Date.now()}`;
-  const ref = storage.ref().child(path);
-  await ref.putString(dataUrl, "data_url");
-  return await ref.getDownloadURL();
 }
 
 /* ---------------- ALMACENAMIENTO ---------------- */
@@ -1011,8 +1001,8 @@ function pdToggleZoom() { pdState.zoomed = !pdState.zoomed; renderRoute(); }
 async function pdUploadComprobante(e) {
   const file = e.target.files?.[0];
   if (!file) return;
-  const url = await uploadToStorage(file, "payment_proofs");
-  pdState.comprobante = url;
+  const dataUrl = await compressImage(file, 1000);
+  pdState.comprobante = dataUrl;
   pdState.comprobanteNombre = file.name;
   renderRoute();
 }
@@ -1326,7 +1316,7 @@ async function pmAddMedia(e) {
   if (!files.length) return;
   syncProductFieldsFromDOM();
   for (const file of files) {
-    const url = await uploadToStorage(file, "products");
+    const url = await compressImage(file, 1000);
     productModalState.media.push({ url, tipo: file.type.startsWith("video") ? "video" : "imagen", vista: null });
   }
   renderProductModal();
