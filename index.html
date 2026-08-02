@@ -944,13 +944,9 @@ function productFormView(product, st) {
 
         ${tieneMedidas ? `
         <div class="measures-box">
-          <p class="flabel" style="margin-bottom:8px;">Guía de tallas (cm)</p>
+          <p class="flabel" style="margin-bottom:8px;">Guía de tallas / medidas</p>
           <div class="measures-grid">
-            ${medidas.busto ? `<div>Busto: <b>${esc(medidas.busto)}</b></div>` : ""}
-            ${medidas.cintura ? `<div>Cintura: <b>${esc(medidas.cintura)}</b></div>` : ""}
-            ${medidas.cadera ? `<div>Cadera: <b>${esc(medidas.cadera)}</b></div>` : ""}
-            ${medidas.largo ? `<div>Largo: <b>${esc(medidas.largo)}</b></div>` : ""}
-            ${medidas.manga ? `<div>Manga: <b>${esc(medidas.manga)}</b></div>` : ""}
+            ${Object.entries(medidas).filter(([, v]) => v).map(([k, v]) => `<div>${esc(MEDIDA_LABELS[k] || k)}: <b>${esc(v)}</b></div>`).join("")}
           </div>
         </div>` : ""}
 
@@ -1292,15 +1288,80 @@ function syncProductFieldsFromDOM() {
   if (!g("pm_nombre")) return;
   st.nombre = g("pm_nombre").value; st.category_id = g("pm_categoria").value;
   st.etiqueta = g("pm_etiqueta").value; st.costo_compra = g("pm_costo").value; st.precio_venta = g("pm_precio").value;
-  st.stock = g("pm_stock").value; st.material = g("pm_material").value; st.descripcion = g("pm_descripcion").value;
-  st.medidas = { busto: g("pm_busto").value, cintura: g("pm_cintura").value, cadera: g("pm_cadera").value, largo: g("pm_largo").value, manga: g("pm_manga").value };
+  st.stock = g("pm_stock").value; st.material = getMaterialValue(); st.descripcion = g("pm_descripcion").value;
+  st.medidas = collectMedidas();
 }
 const VISTAS_MEDIA = ["frontal", "lateral", "trasera", "tela", "puesta"];
+/* Campos de medidas y materiales según la categoría — no todas las categorías se miden igual. */
+const MEDIDA_LABELS = {
+  busto: "Busto (cm)", cintura: "Cintura (cm)", cadera: "Cadera (cm)", largo: "Largo (cm)", manga: "Manga (cm)",
+  talla: "Talla (EU)", ancho: "Ancho de horma (cm)", altura_tacon: "Altura de tacón (cm)",
+  alto: "Alto (cm)", profundidad: "Profundidad (cm)",
+};
+const MEDIDAS_POR_CATEGORIA = {
+  "Blusas": [["busto", "Busto"], ["cintura", "Cintura"], ["largo", "Largo"], ["manga", "Manga"]],
+  "Vestidos": [["busto", "Busto"], ["cintura", "Cintura"], ["cadera", "Cadera"], ["largo", "Largo"]],
+  "Pantalones": [["cintura", "Cintura"], ["cadera", "Cadera"], ["largo", "Largo"]],
+  "Zapatos": [["talla", "Talla (EU)"], ["ancho", "Ancho de horma (cm)"]],
+  "Tacones": [["talla", "Talla (EU)"], ["altura_tacon", "Altura de tacón (cm)"]],
+  "Carteras": [["ancho", "Ancho (cm)"], ["alto", "Alto (cm)"], ["profundidad", "Profundidad (cm)"]],
+};
+const MATERIALES_ROPA = [
+  "Algodón", "Poliéster", "Lino", "Seda", "Lycra / Elastano", "Mezclilla (denim)", "Rayón",
+  "Viscosa", "Chifón", "Encaje", "Punto (jersey)", "Lana", "Franela", "Terciopelo", "Satín", "Cuero sintético",
+];
+const MATERIALES_CALZADO = ["Cuero genuino", "Cuero sintético (PU)", "Gamuza", "Charol", "Lona / Tela", "Malla", "Sintético", "Goma / Caucho"];
+const MATERIALES_POR_CATEGORIA = {
+  "Blusas": MATERIALES_ROPA,
+  "Vestidos": MATERIALES_ROPA,
+  "Pantalones": MATERIALES_ROPA,
+  "Zapatos": MATERIALES_CALZADO,
+  "Tacones": MATERIALES_CALZADO,
+  "Carteras": ["Cuero genuino", "Cuero sintético", "Lona", "Nylon", "Yute", "Sintético"],
+  "Maquillaje": ["Polvo", "Líquido", "Crema", "Gel", "Barra / Stick", "Aerosol / Spray"],
+  "Tecnología": ["Plástico (ABS/Policarbonato)", "Metal (aluminio)", "Vidrio templado", "Silicona", "Fibra de carbono", "Cuero sintético"],
+};
+function medidasFieldsHtml(categoriaNombre, medidas) {
+  const campos = MEDIDAS_POR_CATEGORIA[categoriaNombre];
+  if (!campos) return "";
+  return `
+    <div class="field">
+      <label class="flabel">Guía de tallas / medidas</label>
+      <div class="field-row" style="grid-template-columns:repeat(${campos.length},1fr);">
+        ${campos.map(([key, label]) => `<input id="pm_med_${key}" type="number" step="0.01" placeholder="${esc(label)}" value="${esc(medidas[key] || "")}">`).join("")}
+      </div>
+    </div>`;
+}
+function collectMedidas() {
+  const medidas = {};
+  document.querySelectorAll('[id^="pm_med_"]').forEach((el) => { medidas[el.id.replace("pm_med_", "")] = el.value; });
+  return medidas;
+}
+function getMaterialValue() {
+  const sel = document.getElementById("pm_material");
+  if (!sel) return "";
+  if (sel.value === "Otro") return document.getElementById("pm_material_otro")?.value || "";
+  return sel.value || "";
+}
+function pmUpdatePrecioSugerido() {
+  const hint = document.getElementById("pm_precio_sugerido");
+  if (!hint) return;
+  const costo = parseFloat(document.getElementById("pm_costo")?.value) || 0;
+  if (costo <= 0) { hint.innerHTML = ""; return; }
+  const margen = 40;
+  const sugerido = costo / (1 - margen / 100);
+  hint.innerHTML = `Precio sugerido (margen ${margen}%): <b>${money(sugerido)}</b> · <button type="button" class="btn-link" onclick="document.getElementById('pm_precio').value='${sugerido.toFixed(2)}'">Usar</button>`;
+}
 function renderProductModal() {
   const st = productModalState;
   const p = st.editingId ? findById("products", st.editingId) : null;
   const val = (field, def) => (st[field] !== undefined ? st[field] : (p ? p[field] : def)) ?? def;
   const medidas = st.medidas || p?.medidas || {};
+  const categoryId = val("category_id", p?.category_id ?? DB.categories[0]?.id);
+  const categoriaNombre = findById("categories", categoryId)?.nombre || "";
+  const materialOpciones = MATERIALES_POR_CATEGORIA[categoriaNombre] || [];
+  const materialActual = val("material", "");
+  const materialEsOtro = !!materialActual && !materialOpciones.includes(materialActual);
   openModal(`
     <h3>${st.editingId ? "Editar producto" : "Nuevo producto"}</h3>
     <div class="field">
@@ -1326,7 +1387,7 @@ function renderProductModal() {
     </div>
     <div class="field-row">
       <div class="field"><label class="flabel">Categoría</label>
-        <select id="pm_categoria">${DB.categories.map((c) => `<option value="${c.id}" ${val("category_id", p?.category_id) === c.id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select>
+        <select id="pm_categoria" onchange="syncProductFieldsFromDOM(); renderProductModal();">${DB.categories.map((c) => `<option value="${c.id}" ${val("category_id", p?.category_id) === c.id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select>
       </div>
       <div class="field"><label class="flabel">Etiqueta</label>
         <select id="pm_etiqueta">
@@ -1336,24 +1397,27 @@ function renderProductModal() {
       </div>
     </div>
     <div class="field-row">
-      <div class="field"><label class="flabel">Costo de compra</label><input id="pm_costo" type="number" step="0.01" required value="${esc(val("costo_compra", ""))}"></div>
-      <div class="field"><label class="flabel">Precio de venta</label><input id="pm_precio" type="number" step="0.01" required value="${esc(val("precio_venta", ""))}"></div>
+      <div class="field"><label class="flabel">Costo de compra</label><input id="pm_costo" type="number" step="0.01" required value="${esc(val("costo_compra", ""))}" oninput="pmUpdatePrecioSugerido()"></div>
+      <div class="field">
+        <label class="flabel">Precio de venta</label>
+        <input id="pm_precio" type="number" step="0.01" required value="${esc(val("precio_venta", ""))}">
+        <p class="muted" id="pm_precio_sugerido" style="font-size:11px;margin-top:4px;"></p>
+      </div>
     </div>
     <div class="field-row">
       <div class="field"><label class="flabel">Stock</label><input id="pm_stock" type="number" required value="${esc(val("stock", 0))}"></div>
-      <div class="field"><label class="flabel">Material</label><input id="pm_material" value="${esc(val("material", ""))}"></div>
-    </div>
-    <div class="field"><label class="flabel">Descripción</label><textarea id="pm_descripcion" rows="2">${esc(val("descripcion", ""))}</textarea></div>
-    <div class="field">
-      <label class="flabel">Guía de tallas (cm)</label>
-      <div class="field-row" style="grid-template-columns:repeat(5,1fr);">
-        <input id="pm_busto" type="number" placeholder="Busto" value="${esc(medidas.busto || "")}">
-        <input id="pm_cintura" type="number" placeholder="Cintura" value="${esc(medidas.cintura || "")}">
-        <input id="pm_cadera" type="number" placeholder="Cadera" value="${esc(medidas.cadera || "")}">
-        <input id="pm_largo" type="number" placeholder="Largo" value="${esc(medidas.largo || "")}">
-        <input id="pm_manga" type="number" placeholder="Manga" value="${esc(medidas.manga || "")}">
+      <div class="field">
+        <label class="flabel">Material</label>
+        <select id="pm_material" onchange="document.getElementById('pm_material_otro').classList.toggle('hidden', this.value !== 'Otro')">
+          <option value="">Selecciona...</option>
+          ${materialOpciones.map((m) => `<option ${materialActual === m ? "selected" : ""}>${esc(m)}</option>`).join("")}
+          <option value="Otro" ${materialEsOtro ? "selected" : ""}>Otro (especificar)</option>
+        </select>
+        <input id="pm_material_otro" placeholder="Especifica el material" class="mt-2 ${materialEsOtro ? "" : "hidden"}" value="${esc(materialEsOtro ? materialActual : "")}">
       </div>
     </div>
+    <div class="field"><label class="flabel">Descripción</label><textarea id="pm_descripcion" rows="2">${esc(val("descripcion", ""))}</textarea></div>
+    ${medidasFieldsHtml(categoriaNombre, medidas)}
     <div class="field-row">
       <div class="field">
         <label class="flabel">Colores disponibles</label>
@@ -1371,6 +1435,7 @@ function renderProductModal() {
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
     </div>
   `);
+  pmUpdatePrecioSugerido();
 }
 async function pmAddMedia(e) {
   const files = Array.from(e.target.files || []);
@@ -1401,8 +1466,8 @@ async function saveProduct() {
   const data = {
     nombre, category_id: g("pm_categoria"), categoria: category?.nombre || "",
     etiqueta: g("pm_etiqueta"), costo_compra: parseFloat(g("pm_costo")) || 0, precio_venta: parseFloat(g("pm_precio")) || 0,
-    stock: parseInt(g("pm_stock")) || 0, material: g("pm_material"), descripcion: g("pm_descripcion"),
-    medidas: { busto: g("pm_busto"), cintura: g("pm_cintura"), cadera: g("pm_cadera"), largo: g("pm_largo"), manga: g("pm_manga") },
+    stock: parseInt(g("pm_stock")) || 0, material: getMaterialValue(), descripcion: g("pm_descripcion"),
+    medidas: collectMedidas(),
     colores: st.colores, tallas: st.tallas, media: st.media,
   };
   if (st.editingId) {
