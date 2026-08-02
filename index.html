@@ -1334,6 +1334,11 @@ const MEDIDAS_POR_TIPO = {
   calzado: [["talla", "Talla (EU)"], ["ancho", "Ancho de horma (cm)"], ["altura_tacon", "Altura de tacón (cm)"]],
   bolsos: [["ancho", "Ancho (cm)"], ["alto", "Alto (cm)"], ["profundidad", "Profundidad (cm)"]],
 };
+const TALLAS_SUGERIDAS_POR_TIPO = {
+  ropa: ["XS", "S", "M", "L", "XL", "XXL"],
+  calzado: ["35", "36", "37", "38", "39", "40", "41", "42"],
+};
+const TALLA_PLACEHOLDER_POR_TIPO = { ropa: "Ej. M", calzado: "Ej. 38" };
 const MATERIALES_POR_TIPO = {
   ropa: MATERIALES_ROPA,
   calzado: MATERIALES_CALZADO,
@@ -1448,7 +1453,11 @@ function renderProductModal() {
       <div class="field">
         <label class="flabel">Tallas disponibles</label>
         <div class="flex flex-wrap gap-2 mb-2">${st.tallas.map((t, i) => `<span class="tag">${esc(t)} <button type="button" onclick="pmRemoveTag('tallas',${i})">×</button></span>`).join("")}</div>
-        <div class="flex gap-2"><input id="pm_tallaInput" placeholder="Ej. M"><button type="button" class="btn btn-ghost btn-sm" onclick="pmAddTag('tallas')">+</button></div>
+        ${(TALLAS_SUGERIDAS_POR_TIPO[tipoProducto] || []).length ? `
+        <div class="flex flex-wrap gap-1 mb-2">
+          ${TALLAS_SUGERIDAS_POR_TIPO[tipoProducto].map((t) => `<button type="button" class="btn btn-ghost btn-sm" style="padding:4px 10px;" onclick="pmAddSuggestedTalla('${esc(t)}')">${esc(t)}</button>`).join("")}
+        </div>` : ""}
+        <div class="flex gap-2"><input id="pm_tallaInput" placeholder="${TALLA_PLACEHOLDER_POR_TIPO[tipoProducto] || "Ej. Talla"}"><button type="button" class="btn btn-ghost btn-sm" onclick="pmAddTag('tallas')">+</button></div>
       </div>
     </div>
     <div class="modal-actions">
@@ -1479,6 +1488,11 @@ function pmAddTag(field) {
   renderProductModal();
 }
 function pmRemoveTag(field, i) { syncProductFieldsFromDOM(); productModalState[field].splice(i, 1); renderProductModal(); }
+function pmAddSuggestedTalla(t) {
+  syncProductFieldsFromDOM();
+  if (!productModalState.tallas.includes(t)) productModalState.tallas.push(t);
+  renderProductModal();
+}
 async function saveProduct() {
   const st = productModalState, g = (id) => document.getElementById(id).value;
   const nombre = g("pm_nombre").trim();
