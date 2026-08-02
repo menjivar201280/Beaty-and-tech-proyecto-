@@ -334,7 +334,6 @@ tbody tr:first-child td { border-top: none; }
 /* ============================================================
    MISC
    ============================================================ */
-.preview-pill { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; font-size: 12px; padding: 8px 16px; border-radius: 999px; box-shadow: var(--shadow); z-index: 30; }
 .file-drop { display: inline-block; background: var(--surface2); border: 1px dashed var(--border); border-radius: 10px; padding: 10px 16px; font-size: 14px; cursor: pointer; }
 .photo-thumb { position: relative; width: 92px; }
 .photo-thumb img, .photo-thumb video { width: 92px; height: 92px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); }
@@ -567,6 +566,7 @@ let authReady = false;
 auth.onAuthStateChanged((user) => {
   currentUser = user;
   authReady = true;
+  if (user) { ensureSeedData().catch((e) => console.error("ensureSeedData", e)); }
   if (window._bootDone) renderRoute();
 });
 function isAdminRoute(hash) { return (hash === "/admin" || hash.indexOf("/admin/") === 0) && hash !== "/admin/login"; }
@@ -638,10 +638,6 @@ function siteHeader() {
       <a href="https://wa.me/50300000000" target="_blank" rel="noreferrer" class="whatsapp-btn" style="margin-left:10px;">WhatsApp</a>
     </div>
   </header>`;
-}
-
-function previewPill() {
-  return `<div class="preview-pill">Vista previa local — los datos se guardan en este navegador</div>`;
 }
 
 /* ================================================================
@@ -716,8 +712,7 @@ route("/", () => {
         ${products.map((p, i) => productCard(p, i)).join("") || `<p class="muted" style="grid-column:1/-1;text-align:center;padding:60px 0;">Todavía no hay productos publicados.</p>`}
       </div>
     </section>
-  </main>
-  ${previewPill()}`;
+  </main>`;
 });
 
 function categoryTile(c, i) {
@@ -2428,10 +2423,9 @@ route("/admin/redes", () => {
 /* ================================================================
    ARRANQUE
    ================================================================ */
-async function boot() {
+function boot() {
   if (!window.location.hash) window.location.hash = "#/";
   attachRealtimeListeners();
-  try { await ensureSeedData(); } catch (e) { console.error("ensureSeedData", e); }
   window._bootDone = true;
   renderRoute();
 }
