@@ -564,24 +564,30 @@ async function crudInsert(name, item) {
     return { id: ref.id, ...item };
   } catch (e) { toast("Error al guardar: " + e.message); throw e; }
 }
-function crudUpdate(name, id, patch) {
-  return db.collection(name).doc(id).update(stripUndefined(patch)).catch((e) => toast("Error al guardar: " + e.message));
+async function crudUpdate(name, id, patch) {
+  try {
+    await db.collection(name).doc(id).update(stripUndefined(patch));
+  } catch (e) { toast("Error al guardar: " + e.message); throw e; }
 }
-function crudDelete(name, id) {
-  return db.collection(name).doc(id).delete().catch((e) => toast("Error al eliminar: " + e.message));
+async function crudDelete(name, id) {
+  try {
+    await db.collection(name).doc(id).delete();
+  } catch (e) { toast("Error al eliminar: " + e.message); throw e; }
 }
 
 /* Contador de SKU: nunca reutiliza un número, ni siquiera si se borra el producto. */
 function formatSku(n) { return "NH-" + String(n).padStart(5, "0"); }
 async function nextSkuNumber() {
-  const ref = db.collection("meta").doc("counters");
-  return db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const current = (snap.exists && snap.data().sku_seq) || 0;
-    const next = current + 1;
-    tx.set(ref, { sku_seq: next }, { merge: true });
-    return next;
-  });
+  try {
+    const ref = db.collection("meta").doc("counters");
+    return await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const current = (snap.exists && snap.data().sku_seq) || 0;
+      const next = current + 1;
+      tx.set(ref, { sku_seq: next }, { merge: true });
+      return next;
+    });
+  } catch (e) { toast("Error al generar el código SKU: " + e.message); throw e; }
 }
 
 function addNotification(tipo, titulo, mensaje, extra) {
@@ -1495,8 +1501,15 @@ function pmAddSuggestedTalla(t) {
 }
 async function saveProduct() {
   const st = productModalState, g = (id) => document.getElementById(id).value;
-  const nombre = g("pm_nombre").trim();
-  if (!nombre) { toast("El nombre es obligatorio"); return; }
+  const nombreEl = document.getElementById("pm_nombre");
+  const nombre = nombreEl.value.trim();
+  nombreEl.style.borderColor = "";
+  if (!nombre) {
+    toast("El nombre es obligatorio");
+    nombreEl.style.borderColor = "var(--danger)";
+    nombreEl.focus();
+    return;
+  }
   const category = findById("categories", g("pm_categoria"));
   const data = {
     nombre, category_id: g("pm_categoria"), categoria: category?.nombre || "",
@@ -1505,16 +1518,23 @@ async function saveProduct() {
     medidas: collectMedidas(),
     colores: st.colores, tallas: st.tallas, media: st.media,
   };
-  if (st.editingId) {
-    crudUpdate("products", st.editingId, data);
-    toast("Producto guardado");
-  } else {
-    const sku = formatSku(await nextSkuNumber());
-    const slug = slugify(nombre) + "-" + Date.now().toString(36).slice(-4);
-    crudInsert("products", { ...data, sku, slug, estado: "disponible", activo: true, stock_reservado: 0 });
-    toast("Producto creado");
+  const btn = document.querySelector(".modal .btn-rose");
+  const btnTextoOriginal = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
+  try {
+    if (st.editingId) {
+      await crudUpdate("products", st.editingId, data);
+      toast("Producto guardado");
+    } else {
+      const sku = formatSku(await nextSkuNumber());
+      const slug = slugify(nombre) + "-" + Date.now().toString(36).slice(-4);
+      await crudInsert("products", { ...data, sku, slug, estado: "disponible", activo: true, stock_reservado: 0 });
+      toast("Producto creado");
+    }
+    closeModal(); renderRoute();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = btnTextoOriginal; }
   }
-  closeModal(); renderRoute();
 }
 function deleteProduct(id) {
   if (!confirmar("¿Eliminar este producto?")) return;
