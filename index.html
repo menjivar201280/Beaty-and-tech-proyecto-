@@ -340,6 +340,7 @@ tbody tr:first-child td { border-top: none; }
 .photo-thumb .remove-btn { position: absolute; top: -8px; right: -8px; background: var(--danger); color: #fff; border: none; border-radius: 999px; width: 20px; height: 20px; font-size: 11px; }
 .hero-cta { display: inline-block; margin-top: 24px; background: var(--ink); color: #fff; font-weight: 800; padding: 12px 28px; border-radius: 999px; font-size: 14px; }
 .hero-cta:hover { background: var(--rose); }
+.hero-slogan { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; color: var(--rose); font-size: 17px; margin-top: 10px; }
 
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
@@ -555,6 +556,19 @@ function crudDelete(name, id) {
   return db.collection(name).doc(id).delete().catch((e) => toast("Error al eliminar: " + e.message));
 }
 
+/* Contador de SKU: nunca reutiliza un número, ni siquiera si se borra el producto. */
+function formatSku(n) { return "NH-" + String(n).padStart(5, "0"); }
+async function nextSkuNumber() {
+  const ref = db.collection("meta").doc("counters");
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const current = (snap.exists && snap.data().sku_seq) || 0;
+    const next = current + 1;
+    tx.set(ref, { sku_seq: next }, { merge: true });
+    return next;
+  });
+}
+
 function addNotification(tipo, titulo, mensaje, extra) {
   crudInsert("notifications", { tipo, titulo, mensaje, leida: false, created_at: nowISO(), ...extra });
 }
@@ -694,6 +708,7 @@ route("/", () => {
       <div class="hero-inner animate-fade-in-up">
         <p class="eyebrow" style="margin-bottom:10px;">Nueva colección</p>
         <h1>Belleza y tecnología <em>al mejor precio</em></h1>
+        <p class="hero-slogan">Un mundo, una experiencia</p>
         <p>Reserva en línea y recibe donde estés en El Salvador.</p>
         <a href="#catalogo" class="hero-cta">Ver catálogo</a>
       </div>
@@ -1246,7 +1261,7 @@ function openProductModal(id) {
 function syncProductFieldsFromDOM() {
   const st = productModalState, g = (id) => document.getElementById(id);
   if (!g("pm_nombre")) return;
-  st.nombre = g("pm_nombre").value; st.sku = g("pm_sku").value; st.category_id = g("pm_categoria").value;
+  st.nombre = g("pm_nombre").value; st.category_id = g("pm_categoria").value;
   st.etiqueta = g("pm_etiqueta").value; st.costo_compra = g("pm_costo").value; st.precio_venta = g("pm_precio").value;
   st.stock = g("pm_stock").value; st.material = g("pm_material").value; st.descripcion = g("pm_descripcion").value;
   st.medidas = { busto: g("pm_busto").value, cintura: g("pm_cintura").value, cadera: g("pm_cadera").value, largo: g("pm_largo").value, manga: g("pm_manga").value };
@@ -1278,7 +1293,7 @@ function renderProductModal() {
     </div>
     <div class="field-row">
       <div class="field"><label class="flabel">Nombre</label><input id="pm_nombre" required value="${esc(val("nombre", ""))}"></div>
-      <div class="field"><label class="flabel">Código SKU</label><input id="pm_sku" required value="${esc(val("sku", ""))}"></div>
+      <div class="field"><label class="flabel">Código SKU</label><input id="pm_sku" readonly disabled style="background:var(--surface2);color:var(--muted);" value="${esc(st.editingId ? val("sku", "") : "(se genera al guardar)")}"></div>
     </div>
     <div class="field-row">
       <div class="field"><label class="flabel">Categoría</label>
@@ -1349,22 +1364,25 @@ function pmAddTag(field) {
   renderProductModal();
 }
 function pmRemoveTag(field, i) { syncProductFieldsFromDOM(); productModalState[field].splice(i, 1); renderProductModal(); }
-function saveProduct() {
+async function saveProduct() {
   const st = productModalState, g = (id) => document.getElementById(id).value;
-  const nombre = g("pm_nombre").trim(), sku = g("pm_sku").trim();
-  if (!nombre || !sku) { toast("Nombre y código son obligatorios"); return; }
+  const nombre = g("pm_nombre").trim();
+  if (!nombre) { toast("El nombre es obligatorio"); return; }
   const category = findById("categories", g("pm_categoria"));
   const data = {
-    nombre, sku, category_id: g("pm_categoria"), categoria: category?.nombre || "",
+    nombre, category_id: g("pm_categoria"), categoria: category?.nombre || "",
     etiqueta: g("pm_etiqueta"), costo_compra: parseFloat(g("pm_costo")) || 0, precio_venta: parseFloat(g("pm_precio")) || 0,
     stock: parseInt(g("pm_stock")) || 0, material: g("pm_material"), descripcion: g("pm_descripcion"),
     medidas: { busto: g("pm_busto"), cintura: g("pm_cintura"), cadera: g("pm_cadera"), largo: g("pm_largo"), manga: g("pm_manga") },
     colores: st.colores, tallas: st.tallas, media: st.media,
   };
-  if (st.editingId) { crudUpdate("products", st.editingId, data); toast("Producto guardado"); }
-  else {
+  if (st.editingId) {
+    crudUpdate("products", st.editingId, data);
+    toast("Producto guardado");
+  } else {
+    const sku = formatSku(await nextSkuNumber());
     const slug = slugify(nombre) + "-" + Date.now().toString(36).slice(-4);
-    crudInsert("products", { ...data, slug, estado: "disponible", activo: true, stock_reservado: 0 });
+    crudInsert("products", { ...data, sku, slug, estado: "disponible", activo: true, stock_reservado: 0 });
     toast("Producto creado");
   }
   closeModal(); renderRoute();
