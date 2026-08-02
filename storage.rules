@@ -1,0 +1,19 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Fotos y videos del catálogo: públicos para lectura, solo el admin sube.
+    match /products/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null && request.resource.size < 25 * 1024 * 1024;
+    }
+    // Comprobantes de pago: cualquiera puede subir el suyo al reservar,
+    // pero solo el admin autenticado puede listarlos/leerlos por regla.
+    // Nota: la URL de descarga que genera el SDK incluye un token que
+    // permite abrir el archivo a quien tenga el enlace exacto (comportamiento
+    // estándar de Firebase Storage) — no la compartas fuera del panel admin.
+    match /payment_proofs/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.resource.size < 10 * 1024 * 1024;
+    }
+  }
+}

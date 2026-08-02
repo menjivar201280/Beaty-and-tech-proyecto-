@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null;
+    }
+
+    // Catálogo público: cualquiera puede leer, solo el admin autenticado escribe.
+    match /categories/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /products/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /delivery_zones/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /meta/{id} { allow read: if true; allow write: if isAdmin(); }
+
+    // Un visitante público puede crear una reserva, comprobante o deseo,
+    // pero solo el admin puede leerlos, editarlos o borrarlos.
+    match /reservations/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+    match /payment_proofs/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+    match /wishlist/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+    match /notifications/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Todo lo demás (ventas, compras, gastos, clientes, proveedores, etc.)
+    // es exclusivo del administrador autenticado.
+    match /{collection}/{id} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
