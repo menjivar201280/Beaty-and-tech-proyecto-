@@ -676,6 +676,7 @@ function siteHeader() {
    LOGIN DE ADMINISTRADOR
    ================================================================ */
 let loginError = "";
+let loginSubmitting = false;
 function adminLoginView() {
   return `
   <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:20px;">
@@ -686,7 +687,7 @@ function adminLoginView() {
         <div class="field"><label class="flabel">Correo</label><input id="login_email" type="email" required autocomplete="username"></div>
         <div class="field"><label class="flabel">Contraseña</label><input id="login_password" type="password" required autocomplete="current-password"></div>
         ${loginError ? `<p style="color:var(--danger);font-size:13px;margin-bottom:10px;">${esc(loginError)}</p>` : ""}
-        <button class="btn btn-rose btn-full">Entrar</button>
+        <button class="btn btn-rose btn-full" ${loginSubmitting ? "disabled" : ""}>${loginSubmitting ? "Ingresando…" : "Entrar"}</button>
       </form>
       <a href="#/" class="btn-link" style="display:block;text-align:center;margin-top:16px;">Volver al catálogo</a>
     </div>
@@ -694,14 +695,23 @@ function adminLoginView() {
 }
 async function adminLogin(e) {
   e.preventDefault();
+  if (loginSubmitting) return;
   const email = document.getElementById("login_email").value.trim();
   const password = document.getElementById("login_password").value;
+  loginSubmitting = true;
+  loginError = "";
+  renderRoute();
+  const timeout = new Promise((_, reject) => setTimeout(() => reject({ code: "timeout" }), 15000));
   try {
-    await auth.signInWithEmailAndPassword(email, password);
-    loginError = "";
+    const cred = await Promise.race([auth.signInWithEmailAndPassword(email, password), timeout]);
+    currentUser = cred.user;
+    loginSubmitting = false;
     navigate("/admin/dashboard");
   } catch (err) {
-    loginError = "Correo o contraseña incorrectos.";
+    loginSubmitting = false;
+    loginError = err && err.code === "timeout"
+      ? "La conexión está tardando demasiado. Verifica tu internet e intenta de nuevo."
+      : "Correo o contraseña incorrectos.";
     renderRoute();
   }
 }
