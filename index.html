@@ -421,6 +421,7 @@ function toast(msg) {
   clearTimeout(el._t);
   el._t = setTimeout(() => (el.style.opacity = "0"), 2200);
 }
+const PLACEHOLDER_IMG = "data:image/png;base64,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QghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKT9He09o62xKyCcAAAAAElFTkSuQmCC";
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -445,6 +446,45 @@ async function compressImage(file, maxW) {
     img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
   });
+}
+/* Fotos/videos de producto van a Firebase Storage (no embebidas en el
+   documento) — necesario para que el catálogo aguante miles de productos
+   sin que cada carga de página descargue megabytes de imágenes en base64. */
+function compressImageToBlob(file, maxW) {
+  return new Promise(async (resolve) => {
+    if (!file.type.startsWith("image")) { resolve(file); return; }
+    const dataUrl = await fileToDataUrl(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, (maxW || 1200) / img.width);
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", 0.82);
+    };
+    img.onerror = () => resolve(file);
+    img.src = dataUrl;
+  });
+}
+async function uploadRawToStorage(blobOrFile, path) {
+  const ref = firebase.storage().ref().child(path);
+  await ref.put(blobOrFile);
+  return await ref.getDownloadURL();
+}
+async function uploadMediaFile(file, folderId) {
+  const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  if (file.type.startsWith("video")) {
+    const ext = (file.name.split(".").pop() || "mp4").toLowerCase();
+    const url = await uploadRawToStorage(file, `products/${folderId}/${stamp}.${ext}`);
+    return { url, thumbUrl: null, tipo: "video" };
+  }
+  const [full, thumb] = await Promise.all([compressImageToBlob(file, 1200), compressImageToBlob(file, 320)]);
+  const [url, thumbUrl] = await Promise.all([
+    uploadRawToStorage(full, `products/${folderId}/${stamp}.jpg`),
+    uploadRawToStorage(thumb, `products/${folderId}/${stamp}_thumb.jpg`),
+  ]);
+  return { url, thumbUrl, tipo: "imagen" };
 }
 
 /* ---------------- ALMACENAMIENTO ---------------- */
@@ -510,7 +550,9 @@ const COLLECTIONS = [
   "categories", "products", "delivery_zones", "reservations", "sales", "purchases", "expenses",
   "cash_registers", "clients", "suppliers", "promotions", "deliveries", "returns", "wishlist",
   "admin_users", "notifications", "payment_proofs", "attributes",
+  "warehouses", "stock_movements", "product_history",
 ];
+const DEFAULT_WAREHOUSE_ID = "bodega_principal";
 const SEEDS = { categories: SEED_CATEGORIES, products: SEED_PRODUCTS, delivery_zones: SEED_ZONES };
 
 const DB = {};
@@ -811,6 +853,15 @@ async function migrateAttributesAndCategories() {
     if (any) await batch2.commit();
   } catch (e) { console.error("migrateAttributesAndCategories", e); }
 }
+/* Siembra la bodega por defecto una sola vez — listo para agregar más bodegas
+   desde /admin/bodegas el día que el negocio las necesite, sin tocar código. */
+async function ensureDefaultWarehouse() {
+  try {
+    const ref = db.collection("warehouses").doc(DEFAULT_WAREHOUSE_ID);
+    const snap = await ref.get();
+    if (!snap.exists) await ref.set({ nombre: "Bodega Principal", ubicacion_descripcion: "", activa: true });
+  } catch (e) { console.error("ensureDefaultWarehouse", e); }
+}
 
 /* Helpers CRUD genéricos, ahora contra Firestore */
 function stripUndefined(obj) {
@@ -834,6 +885,27 @@ async function crudDelete(name, id) {
   try {
     await db.collection(name).doc(id).delete();
   } catch (e) { toast("Error al eliminar: " + e.message); throw e; }
+}
+
+/* ---------------- KARDEX — un registro por cada movimiento de stock ---------------- */
+/* tipo: venta | compra | reserva | liberacion_reserva | entrega | devolucion | ajuste_manual */
+async function logStockMovement({ productId, variantId, tipo, cantidad, stockResultante, referenciaId, motivo }) {
+  try {
+    await crudInsert("stock_movements", {
+      product_id: productId, variant_id: variantId || null, warehouse_id: DEFAULT_WAREHOUSE_ID,
+      tipo, cantidad, stock_resultante: stockResultante, referencia_id: referenciaId || null,
+      motivo: motivo || "", usuario: currentUser?.email || "sistema", fecha: nowISO(),
+    });
+  } catch (e) { console.error("logStockMovement", e); }
+}
+/* ---------------- HISTORIAL DE AUDITORÍA — snapshot del producto en cada guardado ---------------- */
+async function logProductHistory(productId, accion, data) {
+  try {
+    await crudInsert("product_history", {
+      product_id: productId, accion, snapshot: data,
+      usuario: currentUser?.email || "sistema", fecha: nowISO(),
+    });
+  } catch (e) { console.error("logProductHistory", e); }
 }
 
 /* Contador de SKU: nunca reutiliza un número, ni siquiera si se borra el producto. */
@@ -862,7 +934,7 @@ let authReady = false;
 auth.onAuthStateChanged((user) => {
   currentUser = user;
   authReady = true;
-  if (user) { ensureSeedData().then(migrateAttributesAndCategories).catch((e) => console.error("ensureSeedData", e)); }
+  if (user) { ensureSeedData().then(migrateAttributesAndCategories).then(ensureDefaultWarehouse).catch((e) => console.error("ensureSeedData", e)); }
   if (window._bootDone) renderRoute();
 });
 function isAdminRoute(hash) { return (hash === "/admin" || hash.indexOf("/admin/") === 0) && hash !== "/admin/login"; }
@@ -1095,7 +1167,8 @@ function toggleCatalogFilter(codigo, value) {
 }
 function clearCatalogFilters() { catalogFilters = {}; renderRoute(); }
 function productCard(p, i) {
-  const img = p.media?.[0]?.url || "data:image/png;base64,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QghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKT9He09o62xKyCcAAAAAElFTkSuQmCC";
+  const primeraMedia = p.media?.[0];
+  const img = primeraMedia?.thumbUrl || primeraMedia?.url || PLACEHOLDER_IMG;
   const agotado = (p.stock || 0) <= 0;
   const catalogBadges = categoryAtributosVisibles(findById("categories", p.category_id)).filter((cfg) => cfg.catalogo)
     .map((cfg) => formatAtributoValor(cfg.attr, legacyAtributosFallback(p)[cfg.attr.codigo])).filter(Boolean).slice(0, 3);
@@ -1167,6 +1240,7 @@ function ensurePdState(product) {
     pdState = {
       productId: product.id, activeMedia: 0, zoomed: false,
       talla: atr.talla?.[0] || "", color: atr.color?.[0] || "",
+      variantSel: {},
       zonaId: DB.delivery_zones.find((z) => z.activa)?.id || "",
       fechaEntrega: todayStr(),
       metodoPago: "transferencia", comprobante: null, comprobanteNombre: "",
@@ -1176,6 +1250,15 @@ function ensurePdState(product) {
   }
   return pdState;
 }
+/* Resuelve la variante concreta elegida por el cliente (todas las dimensiones
+   seleccionadas) o null si el producto no tiene variantes o falta elegir algo. */
+function pdResolveVariant(product) {
+  if (!product.variantes?.length) return null;
+  const dims = product.variante_atributos || [];
+  if (!dims.length || !dims.every((d) => pdState.variantSel[d])) return null;
+  return product.variantes.find((v) => dims.every((d) => v.combinacion[d] === pdState.variantSel[d])) || null;
+}
+function pdSetVariantDim(codigo, valor) { pdState.variantSel[codigo] = valor; renderRoute(); }
 function stockStateOf(p) {
   const stock = Number(p.stock) || 0;
   if (stock <= 0 || p.estado === "agotado") return { label: "Agotado", cls: "agotado" };
@@ -1214,8 +1297,9 @@ function productReceiptView(product, st) {
         <p style="margin-top:4px;font-size:14px;">Número de orden: <b style="font-family:monospace;">${esc(r.numero_orden)}</b></p>
         <div class="detail-box">
           <div class="detail-row"><span>Producto</span><b>${esc(product.nombre)}</b></div>
+          ${r.variant_combinacion ? Object.entries(r.variant_combinacion).map(([codigo, valor]) => `<div class="detail-row"><span>${esc(attributeByCodigo(codigo)?.etiqueta || codigo)}</span><b>${esc(valor)}</b></div>`).join("") : `
           ${st.talla ? `<div class="detail-row"><span>Talla</span><b>${esc(st.talla)}</b></div>` : ""}
-          ${st.color ? `<div class="detail-row"><span>Color</span><b>${esc(st.color)}</b></div>` : ""}
+          ${st.color ? `<div class="detail-row"><span>Color</span><b>${esc(st.color)}</b></div>` : ""}`}
           <div class="detail-row"><span>Zona de entrega</span><b>${esc(r.zona_nombre || "")}</b></div>
           <div class="detail-row" style="border-top:1px solid var(--border);padding-top:10px;margin-top:6px;"><span>Precio del producto</span><b>${money(r.precio_producto)}</b></div>
           <div class="detail-row"><span>Delivery</span><b>${money(r.costo_delivery)}</b></div>
@@ -1237,9 +1321,15 @@ function productReceiptView(product, st) {
 
 function productFormView(product, st) {
   const zona = DB.delivery_zones.find((z) => z.id === st.zonaId);
-  const entrega = tipoEntregaInfo(st.fechaEntrega, product.precio_venta);
-  const total = +(product.precio_venta + (zona?.costo || 0)).toFixed(2);
-  const stockInfo = stockStateOf(product);
+  const tieneVariantes = product.variantes?.length > 0;
+  const variantDims = product.variante_atributos || [];
+  const variante = pdResolveVariant(product);
+  const precioEfectivo = variante ? (variante.precio_oferta ?? variante.precio_venta ?? product.precio_venta) : product.precio_venta;
+  const entrega = tipoEntregaInfo(st.fechaEntrega, precioEfectivo);
+  const total = +(precioEfectivo + (zona?.costo || 0)).toFixed(2);
+  const stockInfo = tieneVariantes
+    ? (!variante ? { label: "Elegí las opciones", cls: "reservado" } : stockStateOf({ stock: variante.stock, estado: variante.estado !== "activa" ? "agotado" : undefined }))
+    : stockStateOf(product);
   const media = product.media?.length ? product.media : [{ url: "data:image/png;base64,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QghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKT9He09o62xKyCcAAAAAElFTkSuQmCC", tipo: "imagen", vista: null }];
   const activeMedia = media[st.activeMedia] || media[0];
   const productAtributos = legacyAtributosFallback(product);
@@ -1248,7 +1338,8 @@ function productFormView(product, st) {
     .map((cfg) => ({ cfg, texto: formatAtributoValor(cfg.attr, productAtributos[cfg.attr.codigo]) }))
     .filter((x) => x.texto);
   const requiereComprobante = st.metodoPago === "transferencia" || st.metodoPago === "deposito";
-  const agotado = (product.stock || 0) <= 0;
+  const faltaElegirVariante = tieneVariantes && !variante;
+  const agotado = tieneVariantes ? (!variante || (variante.stock || 0) <= 0 || variante.estado !== "activa") : (product.stock || 0) <= 0;
 
   return `
   ${siteHeader()}
@@ -1273,7 +1364,7 @@ function productFormView(product, st) {
         <p class="cat" style="font-size:11px;text-transform:uppercase;font-weight:800;color:var(--muted);">${esc(product.categoria || "")}</p>
         <h1 class="font-display" style="font-size:26px;font-weight:600;margin:2px 0;">${esc(product.nombre)}</h1>
         <div class="flex items-center gap-3 mt-2">
-          <p class="price" style="font-size:20px;">${money(product.precio_venta)}</p>
+          <p class="price" style="font-size:20px;">${money(precioEfectivo)}</p>
           <span class="stock-badge ${stockInfo.cls}">${stockInfo.label}</span>
         </div>
         <p class="muted mt-3" style="font-size:14px;line-height:1.6;">${esc(product.descripcion || "")}</p>
@@ -1287,6 +1378,17 @@ function productFormView(product, st) {
         </div>` : ""}
 
         <form onsubmit="pdSubmit(event, '${product.id}')" style="margin-top:24px;">
+          ${tieneVariantes ? variantDims.map((codigo) => {
+            const attr = attributeByCodigo(codigo);
+            const valores = [...new Set(product.variantes.map((v) => v.combinacion[codigo]))];
+            return `
+          <div class="field">
+            <label class="flabel">${esc(attr?.etiqueta || codigo)}</label>
+            <div class="chip-select">
+              ${valores.map((v) => `<button type="button" class="${st.variantSel[codigo] === v ? "active rose" : ""}" onclick="pdSetVariantDim('${codigo}',${JSON.stringify(v)})">${esc(v)}</button>`).join("")}
+            </div>
+          </div>`;
+          }).join("") : `
           ${productAtributos.talla?.length ? `
           <div class="field">
             <label class="flabel">Talla</label>
@@ -1301,7 +1403,7 @@ function productFormView(product, st) {
             <div class="chip-select">
               ${productAtributos.color.map((c) => `<button type="button" class="${st.color === c ? "active rose" : ""}" onclick="pdSetField('color','${esc(c)}')">${esc(c)}</button>`).join("")}
             </div>
-          </div>` : ""}
+          </div>` : ""}`}
 
           <div class="field">
             <label class="flabel">Zona de entrega</label>
@@ -1364,7 +1466,7 @@ function productFormView(product, st) {
           ${st.errorMsg ? `<p style="color:var(--danger);font-size:13px;margin-top:10px;">${esc(st.errorMsg)}</p>` : ""}
 
           <button class="btn btn-rose btn-full" style="margin-top:16px;" ${st.submitting || agotado ? "disabled" : ""}>
-            ${agotado ? "Producto agotado" : st.submitting ? "Enviando..." : (entrega.esInmediato ? "Confirmar pedido" : "Reservar ahora")}
+            ${faltaElegirVariante ? "Elegí las opciones" : agotado ? "Producto agotado" : st.submitting ? "Enviando..." : (entrega.esInmediato ? "Confirmar pedido" : "Reservar ahora")}
           </button>
           <p class="muted" style="font-size:11px;text-align:center;margin-top:8px;">${entrega.esInmediato ? "Tu pedido se procesa de inmediato al confirmar el pago." : "La reserva se mantiene activa por 24 horas mientras se confirma el anticipo."}</p>
         </form>
@@ -1389,15 +1491,21 @@ async function pdSubmit(e, productId) {
   const product = findById("products", productId);
   const st = pdState;
   if (!st.nombre.trim() || !st.whatsapp.trim()) { st.errorMsg = "Completa nombre y WhatsApp."; renderRoute(); return; }
-  const disponible = (product.stock || 0) - (product.stock_reservado || 0);
-  if (disponible <= 0) { st.errorMsg = "Este producto ya no tiene existencia disponible."; renderRoute(); return; }
+  const tieneVariantes = product.variantes?.length > 0;
+  const variante = pdResolveVariant(product);
+  if (tieneVariantes && !variante) { st.errorMsg = "Elegí todas las opciones antes de continuar."; renderRoute(); return; }
+  const disponible = tieneVariantes
+    ? (variante.stock || 0) - (variante.stock_reservado || 0)
+    : (product.stock || 0) - (product.stock_reservado || 0);
+  if (disponible <= 0 || (tieneVariantes && variante.estado !== "activa")) { st.errorMsg = "Este producto ya no tiene existencia disponible."; renderRoute(); return; }
 
   st.submitting = true; st.errorMsg = ""; renderRoute();
 
+  const precioEfectivo = tieneVariantes ? (variante.precio_oferta ?? variante.precio_venta ?? product.precio_venta) : product.precio_venta;
   const zona = DB.delivery_zones.find((z) => z.id === st.zonaId);
   const costoDelivery = zona?.costo || 0;
-  const entrega = tipoEntregaInfo(st.fechaEntrega, product.precio_venta);
-  const total = +(product.precio_venta + costoDelivery).toFixed(2);
+  const entrega = tipoEntregaInfo(st.fechaEntrega, precioEfectivo);
+  const total = +(precioEfectivo + costoDelivery).toFixed(2);
   const numeroOrden = `NH-${new Date().getFullYear()}-${String(DB.reservations.length + 1).padStart(6, "0")}`;
 
   try {
@@ -1405,8 +1513,9 @@ async function pdSubmit(e, productId) {
       numero_orden: numeroOrden, cliente_nombre: st.nombre, cliente_whatsapp: st.whatsapp,
       cliente_correo: st.correo || null, direccion: st.direccion || null,
       product_id: product.id, producto_nombre: product.nombre, talla: st.talla || null, color: st.color || null,
+      variant_id: variante?.id || null, variant_sku: variante?.sku || null, variant_combinacion: variante?.combinacion || null,
       cantidad: 1, delivery_zone_id: st.zonaId || null, zona_nombre: zona?.nombre || null,
-      precio_producto: product.precio_venta, costo_producto: product.costo_compra,
+      precio_producto: precioEfectivo, costo_producto: product.costo_compra,
       monto_reserva: entrega.montoReserva, tipo_entrega: entrega.esInmediato ? "inmediato" : "reserva",
       fecha_entrega: st.fechaEntrega || null, costo_delivery: costoDelivery, total_a_pagar: total,
       metodo_pago: st.metodoPago, comprobante_url: st.comprobante || null,
@@ -1414,9 +1523,19 @@ async function pdSubmit(e, productId) {
       created_at: nowISO(), expira_at: new Date(Date.now() + 24 * 3600000).toISOString(),
     });
 
-    crudUpdate("products", product.id, {
-      stock_reservado: (product.stock_reservado || 0) + 1,
-      estado: disponible - 1 <= 0 ? "reservado" : product.estado,
+    if (tieneVariantes) {
+      const nuevasVariantes = product.variantes.map((v) => v.id === variante.id ? { ...v, stock_reservado: (v.stock_reservado || 0) + 1 } : v);
+      await crudUpdate("products", product.id, { variantes: nuevasVariantes });
+    } else {
+      await crudUpdate("products", product.id, {
+        stock_reservado: (product.stock_reservado || 0) + 1,
+        estado: disponible - 1 <= 0 ? "reservado" : product.estado,
+      });
+    }
+    logStockMovement({
+      productId: product.id, variantId: variante?.id, tipo: "reserva", cantidad: 1,
+      stockResultante: tieneVariantes ? variante.stock : product.stock, referenciaId: reservation.id,
+      motivo: `Reserva ${numeroOrden} — ${st.nombre}`,
     });
 
     if (st.comprobante) {
@@ -1614,8 +1733,12 @@ function openProductModal(id) {
   const p = id ? findById("products", id) : null;
   productModalState = {
     editingId: id || null,
+    draftId: id || ("draft_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
     media: p ? [...(p.media || [])] : [],
     atributos: legacyAtributosFallback(p),
+    variante_atributos: p ? [...(p.variante_atributos || [])] : [],
+    variantes: p ? (p.variantes || []).map((v) => ({ ...v, combinacion: { ...v.combinacion } })) : [],
+    uploading: false,
   };
   renderProductModal();
 }
@@ -1752,6 +1875,112 @@ function syncAtributosFromDOM(categoria) {
     else productModalState.atributos[a.codigo] = el.value;
   });
 }
+
+/* ---------------- VARIANTES — SKU/código de barras/precio/stock por combinación ---------------- */
+/* Los valores de cada dimensión salen de lo ya cargado en la pestaña Atributos
+   (ej. Talla: S, M, L) — no se piden por separado. Solo atributos de
+   selección múltiple configurados para la categoría pueden ser dimensión. */
+function pmVariantDimensionCandidates(categoria) {
+  return categoryAtributosVisibles(categoria).filter((cfg) => cfg.attr.tipo_dato === "multiseleccion");
+}
+function pmToggleVariantDim(codigo) {
+  syncProductFieldsFromDOM();
+  const st = productModalState;
+  const i = st.variante_atributos.indexOf(codigo);
+  if (i >= 0) st.variante_atributos.splice(i, 1); else st.variante_atributos.push(codigo);
+  renderProductModal();
+}
+function pmGenerateVariantCombinations() {
+  syncProductFieldsFromDOM();
+  const st = productModalState;
+  const dims = st.variante_atributos;
+  if (!dims.length) { toast("Elegí al menos un atributo como dimensión de variante"); return; }
+  const valueLists = dims.map((codigo) => (st.atributos[codigo] || []).filter(Boolean));
+  const vacio = dims.find((codigo, i) => !valueLists[i].length);
+  if (vacio) { toast(`Cargá los valores de "${SEED_ATTRIBUTES.find((a) => a.codigo === vacio)?.etiqueta || vacio}" en la pestaña Atributos antes de generar variantes`); return; }
+  const combos = valueLists.reduce((acc, list) => acc.flatMap((prefix) => list.map((v) => [...prefix, v])), [[]]);
+  const existing = st.variantes || [];
+  st.variantes = combos.map((combo) => {
+    const combinacion = {};
+    dims.forEach((codigo, i) => { combinacion[codigo] = combo[i]; });
+    const match = existing.find((v) => dims.every((codigo) => v.combinacion[codigo] === combinacion[codigo]));
+    if (match) return match;
+    return {
+      id: "var_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      combinacion, sku: "", codigo_barras: "", precio_venta: null, precio_oferta: null, stock: 0, stock_reservado: 0, peso: null, estado: "activa",
+    };
+  });
+  renderProductModal();
+}
+function pmSetVariantField(i, field, value) {
+  syncProductFieldsFromDOM();
+  const v = productModalState.variantes[i];
+  if (field === "stock") v.stock = parseInt(value) || 0;
+  else if (field === "precio_venta" || field === "precio_oferta" || field === "peso") v[field] = value === "" ? null : parseFloat(value);
+  else v[field] = value;
+}
+function pmRemoveVariant(i) { syncProductFieldsFromDOM(); productModalState.variantes.splice(i, 1); renderProductModal(); }
+function pmGenerarSkusAutomaticos() {
+  syncProductFieldsFromDOM();
+  const st = productModalState;
+  const base = slugify(document.getElementById("pm_nombre")?.value || "prod").slice(0, 6).toUpperCase();
+  st.variantes.forEach((v, i) => { if (!v.sku) v.sku = `${base}-${String(i + 1).padStart(3, "0")}`; });
+  renderProductModal();
+}
+function pmAplicarPrecioATodas() {
+  syncProductFieldsFromDOM();
+  const precio = prompt("Precio a aplicar a todas las variantes (deja vacío para usar el precio normal del producto):");
+  if (precio === null) return;
+  const val = precio.trim() === "" ? null : parseFloat(precio);
+  if (precio.trim() !== "" && isNaN(val)) { toast("Precio inválido"); return; }
+  productModalState.variantes.forEach((v) => { v.precio_venta = val; });
+  renderProductModal();
+}
+function renderVariantesSection(st, categoria) {
+  const candidatos = pmVariantDimensionCandidates(categoria);
+  if (!candidatos.length) {
+    return `<p class="muted" style="font-size:12px;">Esta categoría no tiene atributos de selección múltiple (como Talla o Color) configurados para usar como variantes.</p>`;
+  }
+  const dims = st.variante_atributos;
+  return `
+    <div class="field">
+      <label class="flabel">¿Qué atributos definen las variantes de este producto?</label>
+      <div class="flex flex-wrap gap-3">
+        ${candidatos.map((cfg) => `<label class="flex items-center gap-1" style="font-size:13px;"><input type="checkbox" ${dims.includes(cfg.attr.codigo) ? "checked" : ""} onchange="pmToggleVariantDim('${cfg.attr.codigo}')"> ${esc(cfg.attr.etiqueta)}</label>`).join("")}
+      </div>
+      <p class="muted" style="font-size:11px;margin-top:4px;">Los valores de cada uno salen de lo que cargaste arriba, en Atributos (ej. Talla: S, M, L).</p>
+    </div>
+    ${dims.length ? `<button type="button" class="btn btn-navy btn-sm mb-3" onclick="pmGenerateVariantCombinations()">Generar combinaciones</button>` : ""}
+    ${st.variantes.length ? `
+    <div class="table-wrap" style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Combinación</th><th>SKU</th><th>Cód. barras</th><th>Precio</th><th>Stock</th><th>Peso (kg)</th><th>Estado</th><th></th></tr></thead>
+        <tbody>
+          ${st.variantes.map((v, i) => `
+          <tr>
+            <td style="font-weight:700;white-space:nowrap;">${dims.map((c) => esc(v.combinacion[c])).join(" / ")}</td>
+            <td><input value="${esc(v.sku)}" style="width:110px;" onchange="pmSetVariantField(${i},'sku',this.value)"></td>
+            <td><input value="${esc(v.codigo_barras || "")}" style="width:110px;" onchange="pmSetVariantField(${i},'codigo_barras',this.value)"></td>
+            <td><input type="number" step="0.01" value="${v.precio_venta ?? ""}" placeholder="normal" style="width:80px;" onchange="pmSetVariantField(${i},'precio_venta',this.value)"></td>
+            <td><input type="number" value="${v.stock ?? 0}" style="width:70px;" onchange="pmSetVariantField(${i},'stock',this.value)"></td>
+            <td><input type="number" step="0.01" value="${v.peso ?? ""}" style="width:70px;" onchange="pmSetVariantField(${i},'peso',this.value)"></td>
+            <td><select onchange="pmSetVariantField(${i},'estado',this.value)" style="width:auto;">
+              <option value="activa" ${v.estado === "activa" ? "selected" : ""}>Activa</option>
+              <option value="agotada" ${v.estado === "agotada" ? "selected" : ""}>Agotada</option>
+              <option value="descontinuada" ${v.estado === "descontinuada" ? "selected" : ""}>Descontinuada</option>
+            </select></td>
+            <td><button type="button" class="btn-danger-text" onclick="pmRemoveVariant(${i})">Eliminar</button></td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="flex gap-2 mt-3">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="pmGenerarSkusAutomaticos()">Generar SKUs automáticos</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="pmAplicarPrecioATodas()">Aplicar un precio a todas</button>
+    </div>` : dims.length ? `<p class="muted" style="font-size:12px;">Hacé clic en "Generar combinaciones".</p>` : ""}
+  `;
+}
+
 function pmUpdatePrecioSugerido() {
   const hint = document.getElementById("pm_precio_sugerido");
   if (!hint) return;
@@ -1774,8 +2003,9 @@ function renderProductModal() {
       <label class="flabel">Fotografías y videos</label>
       <div class="flex flex-wrap gap-3" style="margin-bottom:10px;">
         ${st.media.map((m, i) => `
-          <div class="photo-thumb">
-            ${m.tipo === "video" ? `<video src="${m.url}"></video>` : `<img src="${m.url}">`}
+          <div class="photo-thumb" draggable="true" ondragstart="pmDragStart(${i})" ondragover="event.preventDefault()" ondrop="pmDrop(${i})" style="position:relative;">
+            ${m.tipo === "video" ? `<video src="${m.url}"></video>` : `<img src="${m.thumbUrl || m.url}" loading="lazy">`}
+            ${i === 0 ? `<span class="badge" style="position:absolute;top:2px;left:2px;font-size:9px;padding:2px 6px;">Principal</span>` : ""}
             <button type="button" class="remove-btn" onclick="pmRemoveMedia(${i})">×</button>
             <select style="font-size:10px;margin-top:2px;padding:2px;" onchange="pmSetVista(${i}, this.value)">
               <option value="">Vista</option>
@@ -1783,9 +2013,12 @@ function renderProductModal() {
             </select>
           </div>`).join("")}
       </div>
-      <label class="file-drop">+ Agregar fotos o videos (ilimitadas)
+      ${st.uploading
+        ? `<p class="muted" style="font-size:13px;">Subiendo…</p>`
+        : `<label class="file-drop">+ Agregar fotos o videos (ilimitadas)
         <input type="file" accept="image/*,video/*" multiple style="display:none;" onchange="pmAddMedia(event)">
-      </label>
+      </label>`}
+      <p class="muted" style="font-size:11px;margin-top:4px;">Arrastrá una foto sobre otra para reordenar — la primera es la imagen principal del catálogo.</p>
     </div>
     <div class="field-row">
       <div class="field"><label class="flabel">Nombre</label><input id="pm_nombre" required value="${esc(val("nombre", ""))}"></div>
@@ -1816,6 +2049,8 @@ function renderProductModal() {
     <h4 style="margin:16px 0 8px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Atributos de ${esc(categoriaObj?.nombre || "la categoría")}</h4>
     ${atributosConfig.map((cfg) => pmAtributoInputHtml(cfg, st.atributos[cfg.attr.codigo])).join("")}
     ` : `<p class="muted" style="font-size:12px;">Esta categoría no tiene atributos configurados. Podés asignarle desde <a href="#/admin/categorias" style="text-decoration:underline;font-weight:700;">Categorías</a>.</p>`}
+    <h4 style="margin:16px 0 8px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Variantes</h4>
+    ${renderVariantesSection(st, categoriaObj)}
     <div class="modal-actions">
       <button class="btn btn-rose" onclick="saveProduct()">${st.editingId ? "Guardar cambios" : "Crear producto"}</button>
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
@@ -1827,13 +2062,31 @@ async function pmAddMedia(e) {
   const files = Array.from(e.target.files || []);
   if (!files.length) return;
   syncProductFieldsFromDOM();
-  for (const file of files) {
-    const url = await compressImage(file, 1000);
-    productModalState.media.push({ url, tipo: file.type.startsWith("video") ? "video" : "imagen", vista: null });
+  productModalState.uploading = true;
+  renderProductModal();
+  try {
+    for (const file of files) {
+      const { url, thumbUrl, tipo } = await uploadMediaFile(file, productModalState.draftId);
+      productModalState.media.push({ url, thumbUrl, tipo, vista: null });
+    }
+  } catch (err) {
+    toast("Error al subir el archivo: " + err.message);
   }
+  productModalState.uploading = false;
   renderProductModal();
 }
 function pmRemoveMedia(i) { syncProductFieldsFromDOM(); productModalState.media.splice(i, 1); renderProductModal(); }
+let pmDragIndex = null;
+function pmDragStart(i) { pmDragIndex = i; }
+function pmDrop(i) {
+  if (pmDragIndex === null || pmDragIndex === i) return;
+  syncProductFieldsFromDOM();
+  const arr = productModalState.media;
+  const [moved] = arr.splice(pmDragIndex, 1);
+  arr.splice(i, 0, moved);
+  pmDragIndex = null;
+  renderProductModal();
+}
 function pmSetVista(i, v) { syncProductFieldsFromDOM(); productModalState.media[i].vista = v || null; renderProductModal(); }
 async function saveProduct() {
   const st = productModalState, g = (id) => document.getElementById(id).value;
@@ -1855,11 +2108,21 @@ async function saveProduct() {
     const vacio = cfg.attr.tipo_dato === "multiseleccion" ? !Array.isArray(v) || v.length === 0 : v === undefined || v === null || v === "";
     if (vacio) { toast(`"${cfg.attr.etiqueta}" es obligatorio`); return; }
   }
+  const codigoBarras = document.getElementById("pm_codigo_barras")?.value.trim() || "";
+  const variantSkus = st.variantes.map((v) => v.sku).filter(Boolean);
+  const dupVariantSkus = variantSkus.filter((s, i) => variantSkus.indexOf(s) !== i);
+  if (dupVariantSkus.length) { toast(`El SKU de variante "${dupVariantSkus[0]}" está repetido entre las variantes de este mismo producto`); return; }
+  const dup = checkDuplicateProduct({ nombre, codigoBarras, excludeId: st.editingId, variantSkus, variantBarcodes: st.variantes.map((v) => v.codigo_barras).filter(Boolean) });
+  if (dup) { toast(dup); return; }
+  const nuevoStock = parseInt(g("pm_stock")) || 0;
+  const stockAnterior = st.editingId ? (findById("products", st.editingId)?.stock || 0) : 0;
   const data = {
     nombre, category_id: g("pm_categoria"), categoria: category?.nombre || "",
     etiqueta: g("pm_etiqueta"), costo_compra: parseFloat(g("pm_costo")) || 0, precio_venta: parseFloat(g("pm_precio")) || 0,
-    stock: parseInt(g("pm_stock")) || 0, descripcion: g("pm_descripcion"),
+    stock: nuevoStock, descripcion: g("pm_descripcion"), codigo_barras: codigoBarras || null,
     atributos: { ...st.atributos }, media: st.media,
+    variante_atributos: [...st.variante_atributos], variantes: st.variantes.map((v) => ({ ...v })),
+    actualizado_por: currentUser?.email || "sistema", actualizado_en: nowISO(),
   };
   const btn = document.querySelector(".modal .btn-rose");
   const btnTextoOriginal = btn ? btn.textContent : "";
@@ -1867,17 +2130,43 @@ async function saveProduct() {
   try {
     if (st.editingId) {
       await crudUpdate("products", st.editingId, data);
+      if (nuevoStock !== stockAnterior) {
+        logStockMovement({
+          productId: st.editingId, tipo: "ajuste_manual", cantidad: nuevoStock - stockAnterior,
+          stockResultante: nuevoStock, motivo: "Edición manual del stock desde el formulario de producto",
+        });
+      }
+      logProductHistory(st.editingId, "actualizado", data);
       toast("Producto guardado");
     } else {
       const sku = formatSku(await nextSkuNumber());
       const slug = slugify(nombre) + "-" + Date.now().toString(36).slice(-4);
-      await crudInsert("products", { ...data, sku, slug, estado: "disponible", activo: true, stock_reservado: 0 });
+      const nuevo = await crudInsert("products", {
+        ...data, sku, slug, estado: "disponible", activo: true, stock_reservado: 0, stock_vendido: 0,
+        creado_por: currentUser?.email || "sistema", creado_en: nowISO(),
+      });
+      if (nuevoStock > 0) {
+        logStockMovement({ productId: nuevo.id, tipo: "ajuste_manual", cantidad: nuevoStock, stockResultante: nuevoStock, motivo: "Stock inicial al crear el producto" });
+      }
+      logProductHistory(nuevo.id, "creado", data);
       toast("Producto creado");
     }
     closeModal(); renderRoute();
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = btnTextoOriginal; }
   }
+}
+function checkDuplicateProduct({ nombre, codigoBarras, sku, excludeId, variantSkus, variantBarcodes }) {
+  const norm = (s) => (s || "").trim().toLowerCase();
+  const otros = DB.products.filter((p) => p.id !== excludeId);
+  if (nombre && otros.some((p) => norm(p.nombre) === norm(nombre))) return `Ya existe un producto llamado "${nombre}".`;
+  const skusOtros = otros.flatMap((p) => [p.sku, ...(p.variantes || []).map((v) => v.sku)]).filter(Boolean).map(norm);
+  const barcodesOtros = otros.flatMap((p) => [p.codigo_barras, ...(p.variantes || []).map((v) => v.codigo_barras)]).filter(Boolean).map(norm);
+  if (codigoBarras && barcodesOtros.includes(norm(codigoBarras))) return `El código de barras "${codigoBarras}" ya está en uso.`;
+  if (sku && skusOtros.includes(norm(sku))) return `El SKU "${sku}" ya está en uso.`;
+  for (const s of variantSkus || []) { if (skusOtros.includes(norm(s))) return `El SKU de variante "${s}" ya está en uso en otro producto.`; }
+  for (const b of variantBarcodes || []) { if (barcodesOtros.includes(norm(b))) return `El código de barras de variante "${b}" ya está en uso en otro producto.`; }
+  return null;
 }
 function deleteProduct(id) {
   if (!confirmar("¿Eliminar este producto?")) return;
@@ -2008,6 +2297,7 @@ function saveCategoryAttributes() {
    tocar código: se crea, edita y elimina todo desde acá).
    ================================================================ */
 function attributeById(id) { return findById("attributes", id); }
+function attributeByCodigo(codigo) { return DB.attributes.find((a) => a.codigo === codigo); }
 route("/admin/atributos", () => {
   const rows = [...DB.attributes].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta)).map((a) => `
     <tr>
@@ -2148,6 +2438,11 @@ function saveSale() {
     producto_nombre: product?.nombre, cantidad, precio_unitario: precio, descuento, total, utilidad,
     canal: document.getElementById("s_canal").value, metodo_pago: document.getElementById("s_metodo").value,
     vendedor: document.getElementById("s_vendedor").value || null,
+  }).then((sale) => {
+    if (!product) return;
+    const nuevoStock = Math.max(0, (product.stock || 0) - cantidad);
+    crudUpdate("products", product.id, { stock: nuevoStock, stock_vendido: (product.stock_vendido || 0) + cantidad });
+    logStockMovement({ productId: product.id, tipo: "venta", cantidad: -cantidad, stockResultante: nuevoStock, referenciaId: sale.id });
   });
   closeModal(); toast("Venta registrada"); renderRoute();
 }
@@ -2187,11 +2482,22 @@ function marcarReservaEntregada(id) {
   if (!confirmar("¿Marcar esta reserva como entregada? Se restará del inventario.")) return;
   const r = findById("reservations", id);
   const p = r ? findById("products", r.product_id) : null;
-  if (p) {
+  if (p && r.variant_id && p.variantes) {
+    const v = p.variantes.find((x) => x.id === r.variant_id);
+    const nuevoStock = Math.max(0, (v?.stock || 0) - (r.cantidad || 1));
+    const nuevasVariantes = p.variantes.map((x) => x.id === r.variant_id
+      ? { ...x, stock: nuevoStock, stock_reservado: Math.max(0, (x.stock_reservado || 0) - (r.cantidad || 1)) }
+      : x);
+    crudUpdate("products", p.id, { variantes: nuevasVariantes });
+    logStockMovement({ productId: p.id, variantId: r.variant_id, tipo: "entrega", cantidad: -(r.cantidad || 1), stockResultante: nuevoStock, referenciaId: id });
+  } else if (p) {
+    const nuevoStock = Math.max(0, (p.stock || 0) - (r.cantidad || 1));
     crudUpdate("products", p.id, {
-      stock: Math.max(0, (p.stock || 0) - (r.cantidad || 1)),
+      stock: nuevoStock,
       stock_reservado: Math.max(0, (p.stock_reservado || 0) - (r.cantidad || 1)),
+      stock_vendido: (p.stock_vendido || 0) + (r.cantidad || 1),
     });
+    logStockMovement({ productId: p.id, tipo: "entrega", cantidad: -(r.cantidad || 1), stockResultante: nuevoStock, referenciaId: id });
   }
   crudUpdate("reservations", id, { estado: "entregado", entregado_at: nowISO() });
   toast("Reserva marcada como entregada");
@@ -2201,11 +2507,19 @@ function cancelarReserva(id) {
   if (!confirmar("¿Cancelar esta reserva? El producto vuelve a estar disponible.")) return;
   const r = findById("reservations", id);
   const p = r ? findById("products", r.product_id) : null;
-  if (p) {
+  if (p && r.variant_id && p.variantes) {
+    const nuevasVariantes = p.variantes.map((x) => x.id === r.variant_id
+      ? { ...x, stock_reservado: Math.max(0, (x.stock_reservado || 0) - (r.cantidad || 1)) }
+      : x);
+    crudUpdate("products", p.id, { variantes: nuevasVariantes });
+    const v = nuevasVariantes.find((x) => x.id === r.variant_id);
+    logStockMovement({ productId: p.id, variantId: r.variant_id, tipo: "liberacion_reserva", cantidad: r.cantidad || 1, stockResultante: v?.stock, referenciaId: id });
+  } else if (p) {
     crudUpdate("products", p.id, {
       stock_reservado: Math.max(0, (p.stock_reservado || 0) - (r.cantidad || 1)),
       estado: p.estado === "reservado" ? "disponible" : p.estado,
     });
+    logStockMovement({ productId: p.id, tipo: "liberacion_reserva", cantidad: r.cantidad || 1, stockResultante: p.stock, referenciaId: id });
   }
   crudUpdate("reservations", id, { estado: "cancelado" });
   toast("Reserva cancelada");
@@ -2264,8 +2578,13 @@ function savePurchase() {
     fecha: todayStr(), tipo: document.getElementById("c_tipo").value, descripcion: document.getElementById("c_descripcion").value,
     proveedor: document.getElementById("c_proveedor").value, cantidad, costo_unitario: costoUnitario, costo_total: cantidad * costoUnitario,
     afecta_inventario: afecta, product_id: productId,
+  }).then((purchase) => {
+    if (!(afecta && productId)) return;
+    const p = findById("products", productId);
+    const nuevoStock = (p.stock || 0) + cantidad;
+    crudUpdate("products", productId, { stock: nuevoStock });
+    logStockMovement({ productId, tipo: "compra", cantidad, stockResultante: nuevoStock, referenciaId: purchase.id });
   });
-  if (afecta && productId) { const p = findById("products", productId); crudUpdate("products", productId, { stock: (p.stock || 0) + cantidad }); }
   closeModal(); toast("Compra registrada"); renderRoute();
 }
 function deletePurchase(id) { if (!confirmar("¿Eliminar esta compra?")) return; crudDelete("purchases", id); renderRoute(); }
@@ -2457,8 +2776,15 @@ function saveReturn() {
   if (cantidad <= 0 || cantidad > sale.cantidad - yaDevuelto) { toast("Cantidad inválida"); return; }
   const motivo = document.getElementById("dv_motivo").value;
   const perUnitTotal = sale.total / sale.cantidad, perUnitUtilidad = sale.utilidad / sale.cantidad;
-  crudInsert("returns", { sale_id: sale.id, fecha: todayStr(), producto_nombre: sale.producto_nombre, cliente_nombre: sale.cliente_nombre, cantidad, motivo, monto: cantidad * perUnitTotal, utilidad_impacto: cantidad * perUnitUtilidad });
-  if (motivo !== "Producto dañado" && sale.product_id) { const p = findById("products", sale.product_id); if (p) crudUpdate("products", p.id, { stock: (p.stock || 0) + cantidad }); }
+  crudInsert("returns", { sale_id: sale.id, fecha: todayStr(), producto_nombre: sale.producto_nombre, cliente_nombre: sale.cliente_nombre, cantidad, motivo, monto: cantidad * perUnitTotal, utilidad_impacto: cantidad * perUnitUtilidad })
+    .then((ret) => {
+      if (motivo === "Producto dañado" || !sale.product_id) return;
+      const p = findById("products", sale.product_id);
+      if (!p) return;
+      const nuevoStock = (p.stock || 0) + cantidad;
+      crudUpdate("products", p.id, { stock: nuevoStock });
+      logStockMovement({ productId: p.id, tipo: "devolucion", cantidad, stockResultante: nuevoStock, referenciaId: ret.id, motivo });
+    });
   closeModal(); toast("Devolución registrada"); renderRoute();
 }
 function deleteReturn(id) { if (!confirmar("¿Eliminar este registro?")) return; crudDelete("returns", id); renderRoute(); }

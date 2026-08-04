@@ -7,13 +7,26 @@ service cloud.firestore {
 
     // Catálogo público: cualquiera puede leer, solo el admin autenticado escribe.
     match /categories/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /products/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /products/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+      // Al reservar, un visitante público necesita marcar el producto como
+      // apartado — se limita a esos dos campos, nunca a precio/stock/nombre.
+      allow update: if !isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock_reservado', 'estado']);
+    }
     match /delivery_zones/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /attributes/{id} { allow read: if true; allow write: if isAdmin(); }
     match /meta/{id} { allow read: if true; allow write: if isAdmin(); }
 
-    // Un visitante público puede crear una reserva, comprobante o deseo,
-    // pero solo el admin puede leerlos, editarlos o borrarlos.
+    // Un visitante público puede crear una reserva, comprobante, deseo o
+    // movimiento de kardex (al reservar), pero solo el admin puede
+    // leerlos, editarlos o borrarlos.
     match /reservations/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+    match /stock_movements/{id} {
       allow create: if true;
       allow read, update, delete: if isAdmin();
     }
