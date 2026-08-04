@@ -509,7 +509,7 @@ const SEED_SETTINGS = { business_name: "NAHUI", currency: "$", maneja_iva: false
 const COLLECTIONS = [
   "categories", "products", "delivery_zones", "reservations", "sales", "purchases", "expenses",
   "cash_registers", "clients", "suppliers", "promotions", "deliveries", "returns", "wishlist",
-  "admin_users", "notifications", "payment_proofs",
+  "admin_users", "notifications", "payment_proofs", "attributes",
 ];
 const SEEDS = { categories: SEED_CATEGORIES, products: SEED_PRODUCTS, delivery_zones: SEED_ZONES };
 
@@ -547,6 +547,269 @@ async function ensureSeedData() {
   batch.set(db.collection("meta").doc("settings"), SEED_SETTINGS);
   batch.set(flagRef, { done: true, at: nowISO() });
   await batch.commit();
+}
+
+/* ================================================================
+   ATRIBUTOS DINÁMICOS — registro global + configuración por categoría.
+   Nada de esto está atado a una categoría específica en el código: una
+   categoría nueva (Joyería, Relojes, etc.) simplemente no tiene atributos
+   hasta que el admin se los asigna desde /admin/categorias.
+   ================================================================ */
+const TIPOS_DATO_ATRIBUTO = [
+  ["texto", "Texto"], ["numero", "Número"], ["booleano", "Sí / No"],
+  ["seleccion", "Selección única"], ["multiseleccion", "Selección múltiple"], ["fecha", "Fecha"],
+];
+const MATERIALES_ROPA = [
+  "Algodón", "Poliéster", "Lino", "Seda", "Lycra / Elastano", "Mezclilla (denim)", "Rayón",
+  "Viscosa", "Chifón", "Encaje", "Punto (jersey)", "Lana", "Franela", "Terciopelo", "Satín", "Cuero sintético",
+];
+const MATERIALES_CALZADO = ["Cuero genuino", "Cuero sintético (PU)", "Gamuza", "Charol", "Lona / Tela", "Malla", "Sintético", "Goma / Caucho"];
+const SEED_ATTRIBUTES = [
+  { id: "attr_talla", codigo: "talla", etiqueta: "Talla", tipo_dato: "multiseleccion", opciones: [], unidad: "", es_variante: true },
+  { id: "attr_color", codigo: "color", etiqueta: "Color", tipo_dato: "multiseleccion", opciones: [], unidad: "", es_variante: true },
+  { id: "attr_sistema_talla", codigo: "sistema_talla", etiqueta: "Sistema de tallas", tipo_dato: "seleccion", opciones: ["EU", "US Hombre", "US Mujer", "UK", "BR Brasil", "MX", "CM"], unidad: "" },
+  { id: "attr_horma", codigo: "horma", etiqueta: "Horma", tipo_dato: "seleccion", opciones: ["Regular", "Ancha", "Angosta", "Estrecha"], unidad: "" },
+  { id: "attr_material_exterior", codigo: "material_exterior", etiqueta: "Material exterior", tipo_dato: "seleccion", opciones: MATERIALES_CALZADO, unidad: "" },
+  { id: "attr_material_interior", codigo: "material_interior", etiqueta: "Material interior", tipo_dato: "seleccion", opciones: ["Textil", "Cuero", "Sintético", "Forro acolchado", "Malla transpirable"], unidad: "" },
+  { id: "attr_plantilla", codigo: "plantilla", etiqueta: "Plantilla", tipo_dato: "seleccion", opciones: ["Removible", "Fija", "Acolchada", "Memory foam"], unidad: "" },
+  { id: "attr_suela", codigo: "suela", etiqueta: "Suela", tipo_dato: "seleccion", opciones: ["Goma", "Caucho", "TR", "EVA", "Cuero"], unidad: "" },
+  { id: "attr_tacon", codigo: "tacon", etiqueta: "Altura de tacón", tipo_dato: "numero", opciones: [], unidad: "cm" },
+  { id: "attr_plataforma", codigo: "plataforma", etiqueta: "Altura de plataforma", tipo_dato: "numero", opciones: [], unidad: "cm" },
+  { id: "attr_impermeable", codigo: "impermeable", etiqueta: "Impermeable", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_antideslizante", codigo: "antideslizante", etiqueta: "Antideslizante", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_deportivo", codigo: "deportivo", etiqueta: "Deportivo", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_casual", codigo: "casual", etiqueta: "Casual", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_formal", codigo: "formal", etiqueta: "Formal", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_procesador", codigo: "procesador", etiqueta: "Procesador", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_ram", codigo: "ram", etiqueta: "Memoria RAM", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_almacenamiento", codigo: "almacenamiento", etiqueta: "Almacenamiento", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_sistema_operativo", codigo: "sistema_operativo", etiqueta: "Sistema Operativo", tipo_dato: "seleccion", opciones: ["Android", "iOS", "Windows", "macOS", "Linux", "Otro"], unidad: "" },
+  { id: "attr_bluetooth", codigo: "bluetooth", etiqueta: "Bluetooth", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_wifi", codigo: "wifi", etiqueta: "WiFi", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_nfc", codigo: "nfc", etiqueta: "NFC", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_usb", codigo: "usb", etiqueta: "USB", tipo_dato: "seleccion", opciones: ["USB-C", "USB-A", "Micro USB", "Lightning", "No aplica"], unidad: "" },
+  { id: "attr_hdmi", codigo: "hdmi", etiqueta: "HDMI", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_pantalla", codigo: "pantalla", etiqueta: "Pantalla", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_bateria", codigo: "bateria", etiqueta: "Batería", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_garantia", codigo: "garantia", etiqueta: "Garantía", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_compatibilidad", codigo: "compatibilidad", etiqueta: "Compatibilidad", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_material", codigo: "material", etiqueta: "Material", tipo_dato: "seleccion", opciones: [...MATERIALES_ROPA, "Cuero genuino", "Cuero sintético", "Metal", "Madera", "Vidrio", "Cerámica", "Plástico"], unidad: "" },
+  { id: "attr_tipo_tela", codigo: "tipo_tela", etiqueta: "Tipo de tela", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_ajuste", codigo: "ajuste", etiqueta: "Ajuste", tipo_dato: "seleccion", opciones: ["Ajustado", "Regular", "Holgado", "Oversize"], unidad: "" },
+  { id: "attr_manga", codigo: "manga", etiqueta: "Manga", tipo_dato: "seleccion", opciones: ["Sin manga", "Corta", "3/4", "Larga"], unidad: "" },
+  { id: "attr_cuello", codigo: "cuello", etiqueta: "Cuello", tipo_dato: "seleccion", opciones: ["Redondo", "V", "Cuello alto", "Camisero", "Escote"], unidad: "" },
+  { id: "attr_largo", codigo: "largo", etiqueta: "Largo", tipo_dato: "seleccion", opciones: ["Mini", "Corto", "Midi", "Largo", "Maxi"], unidad: "" },
+  { id: "attr_cintura", codigo: "cintura", etiqueta: "Cintura", tipo_dato: "numero", opciones: [], unidad: "cm" },
+  { id: "attr_cadera", codigo: "cadera", etiqueta: "Cadera", tipo_dato: "numero", opciones: [], unidad: "cm" },
+  { id: "attr_temporada", codigo: "temporada", etiqueta: "Temporada", tipo_dato: "seleccion", opciones: ["Verano", "Invierno", "Todo el año", "Primavera/Otoño"], unidad: "" },
+  { id: "attr_escote", codigo: "escote", etiqueta: "Escote", tipo_dato: "seleccion", opciones: ["Redondo", "V", "Corazón", "Halter", "Strapless", "Cuadrado"], unidad: "" },
+  { id: "attr_corte", codigo: "corte", etiqueta: "Corte", tipo_dato: "seleccion", opciones: ["Recto", "Evasé", "Sirena", "Ajustado", "Campana"], unidad: "" },
+  { id: "attr_transparencia", codigo: "transparencia", etiqueta: "Transparencia", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_forro", codigo: "forro", etiqueta: "Forro", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_cinturon", codigo: "cinturon", etiqueta: "Cinturón", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_ocasion", codigo: "ocasion", etiqueta: "Ocasión", tipo_dato: "seleccion", opciones: ["Casual", "Formal", "Fiesta", "Playa", "Trabajo", "Novia"], unidad: "" },
+  { id: "attr_entrepierna", codigo: "entrepierna", etiqueta: "Entrepierna", tipo_dato: "numero", opciones: [], unidad: "cm" },
+  { id: "attr_tipo_corte_pantalon", codigo: "tipo_corte_pantalon", etiqueta: "Tipo de corte", tipo_dato: "seleccion", opciones: ["Skinny", "Recto", "Bota campana", "Jogger", "Palazzo", "Cargo"], unidad: "" },
+  { id: "attr_elasticidad", codigo: "elasticidad", etiqueta: "Elasticidad", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_bolsillos", codigo: "bolsillos", etiqueta: "Cantidad de bolsillos", tipo_dato: "numero", opciones: [], unidad: "" },
+  { id: "attr_marca", codigo: "marca", etiqueta: "Marca", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_linea", codigo: "linea", etiqueta: "Línea", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_tono", codigo: "tono", etiqueta: "Tono", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_acabado", codigo: "acabado", etiqueta: "Acabado", tipo_dato: "seleccion", opciones: ["Mate", "Satinado", "Brillante", "Natural", "Dewy"], unidad: "" },
+  { id: "attr_tipo_piel", codigo: "tipo_piel", etiqueta: "Tipo de piel", tipo_dato: "seleccion", opciones: ["Normal", "Seca", "Grasa", "Mixta", "Sensible", "Todo tipo de piel"], unidad: "" },
+  { id: "attr_cobertura", codigo: "cobertura", etiqueta: "Cobertura", tipo_dato: "seleccion", opciones: ["Ligera", "Media", "Alta", "Completa"], unidad: "" },
+  { id: "attr_contenido", codigo: "contenido", etiqueta: "Contenido", tipo_dato: "texto", opciones: [], unidad: "ml / g" },
+  { id: "attr_lote", codigo: "lote", etiqueta: "Lote", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_fecha_fabricacion", codigo: "fecha_fabricacion", etiqueta: "Fecha de fabricación", tipo_dato: "fecha", opciones: [], unidad: "" },
+  { id: "attr_fecha_vencimiento", codigo: "fecha_vencimiento", etiqueta: "Fecha de vencimiento", tipo_dato: "fecha", opciones: [], unidad: "" },
+  { id: "attr_spf", codigo: "spf", etiqueta: "SPF", tipo_dato: "numero", opciones: [], unidad: "SPF" },
+  { id: "attr_cruelty_free", codigo: "cruelty_free", etiqueta: "Cruelty Free", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_vegano", codigo: "vegano", etiqueta: "Vegano", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_libre_parabenos", codigo: "libre_parabenos", etiqueta: "Libre de parabenos", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_dermatologicamente_probado", codigo: "dermatologicamente_probado", etiqueta: "Dermatológicamente probado", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_resistente_agua", codigo: "resistente_agua", etiqueta: "Resistente al agua", tipo_dato: "booleano", opciones: [], unidad: "" },
+  { id: "attr_familia_olfativa", codigo: "familia_olfativa", etiqueta: "Familia olfativa", tipo_dato: "seleccion", opciones: ["Floral", "Amaderada", "Cítrica", "Oriental", "Fresca", "Especiada", "Frutal", "Acuática"], unidad: "" },
+  { id: "attr_notas_salida", codigo: "notas_salida", etiqueta: "Notas de salida", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_notas_corazon", codigo: "notas_corazon", etiqueta: "Notas de corazón", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_notas_fondo", codigo: "notas_fondo", etiqueta: "Notas de fondo", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_concentracion", codigo: "concentracion", etiqueta: "Concentración", tipo_dato: "seleccion", opciones: ["Perfume (Parfum)", "Eau de Parfum", "Eau de Toilette", "Eau de Cologne", "Eau Fraiche"], unidad: "" },
+  { id: "attr_genero", codigo: "genero", etiqueta: "Género", tipo_dato: "seleccion", opciones: ["Masculino", "Femenino", "Unisex"], unidad: "" },
+  { id: "attr_duracion_aprox", codigo: "duracion_aprox", etiqueta: "Duración aproximada", tipo_dato: "texto", opciones: [], unidad: "" },
+  { id: "attr_peso", codigo: "peso", etiqueta: "Peso", tipo_dato: "texto", opciones: [], unidad: "g / kg" },
+  { id: "attr_medidas_accesorio", codigo: "medidas_accesorio", etiqueta: "Medidas", tipo_dato: "texto", opciones: [], unidad: "cm" },
+  { id: "attr_tipo_cierre", codigo: "tipo_cierre", etiqueta: "Tipo de cierre", tipo_dato: "seleccion", opciones: ["Cremallera", "Broche", "Imán", "Cordón", "Botón", "Sin cierre"], unidad: "" },
+  { id: "attr_ajustable", codigo: "ajustable", etiqueta: "Ajustable", tipo_dato: "booleano", opciones: [], unidad: "" },
+];
+/* Set de atributos por defecto para las 8 categorías de ejemplo — solo se usa
+   para poblar categorías nuevas/existentes que aún no tienen configuración propia.
+   [codigo, overrides] — lo que no se especifica toma los valores por defecto. */
+const CATEGORY_ATTR_BUCKETS = {
+  calzado: [
+    ["talla", { obligatorio: true, ficha: true, filtro: true }],
+    ["sistema_talla", { ficha: true }],
+    ["horma", { ficha: true }],
+    ["material_exterior", { obligatorio: true, ficha: true, filtro: true }],
+    ["material_interior", { ficha: true }],
+    ["plantilla", { ficha: true }],
+    ["suela", { ficha: true }],
+    ["tacon", { ficha: true }],
+    ["plataforma", { ficha: true }],
+    ["impermeable", { ficha: true, filtro: true }],
+    ["antideslizante", { ficha: true }],
+    ["deportivo", { ficha: true, filtro: true }],
+    ["casual", { ficha: true, filtro: true }],
+    ["formal", { ficha: true, filtro: true }],
+    ["color", { obligatorio: true, ficha: true, filtro: true, catalogo: true }],
+  ],
+  tecnologia: [
+    ["procesador", { ficha: true, filtro: true }],
+    ["ram", { ficha: true, filtro: true }],
+    ["almacenamiento", { ficha: true, filtro: true }],
+    ["sistema_operativo", { ficha: true, filtro: true }],
+    ["bluetooth", { ficha: true }],
+    ["wifi", { ficha: true }],
+    ["nfc", { ficha: true }],
+    ["usb", { ficha: true }],
+    ["hdmi", { ficha: true }],
+    ["pantalla", { ficha: true }],
+    ["bateria", { ficha: true }],
+    ["garantia", { ficha: true, catalogo: true }],
+    ["compatibilidad", { ficha: true }],
+    ["color", { ficha: true, filtro: true, catalogo: true }],
+  ],
+  ropa: [
+    ["talla", { obligatorio: true, ficha: true, filtro: true, catalogo: true }],
+    ["color", { obligatorio: true, ficha: true, filtro: true, catalogo: true }],
+    ["material", { ficha: true, filtro: true }],
+    ["tipo_tela", { ficha: true }],
+    ["ajuste", { ficha: true, filtro: true }],
+    ["manga", { ficha: true, filtro: true }],
+    ["cuello", { ficha: true }],
+    ["largo", { ficha: true }],
+    ["cintura", { ficha: true }],
+    ["cadera", { ficha: true }],
+    ["temporada", { ficha: true, filtro: true }],
+  ],
+  vestidos: [
+    ["talla", { obligatorio: true, ficha: true, filtro: true, catalogo: true }],
+    ["color", { obligatorio: true, ficha: true, filtro: true, catalogo: true }],
+    ["escote", { ficha: true, filtro: true }],
+    ["largo", { ficha: true, filtro: true }],
+    ["corte", { ficha: true, filtro: true }],
+    ["manga", { ficha: true }],
+    ["material", { ficha: true, filtro: true }],
+    ["transparencia", { ficha: true }],
+    ["forro", { ficha: true }],
+    ["cinturon", { ficha: true }],
+    ["ocasion", { ficha: true, filtro: true, catalogo: true }],
+  ],
+  pantalones: [
+    ["talla", { obligatorio: true, ficha: true, filtro: true, catalogo: true }],
+    ["color", { ficha: true, filtro: true }],
+    ["cintura", { obligatorio: true, ficha: true }],
+    ["largo", { ficha: true }],
+    ["entrepierna", { ficha: true }],
+    ["ajuste", { ficha: true, filtro: true }],
+    ["tipo_corte_pantalon", { ficha: true, filtro: true }],
+    ["material", { ficha: true }],
+    ["elasticidad", { ficha: true }],
+    ["bolsillos", { ficha: true }],
+  ],
+  maquillaje: [
+    ["marca", { obligatorio: true, ficha: true, filtro: true, catalogo: true }],
+    ["linea", { ficha: true }],
+    ["tono", { ficha: true, filtro: true }],
+    ["acabado", { ficha: true, filtro: true }],
+    ["tipo_piel", { ficha: true, filtro: true }],
+    ["cobertura", { ficha: true }],
+    ["contenido", { ficha: true }],
+    ["lote", { ficha: true }],
+    ["fecha_fabricacion", { ficha: true }],
+    ["fecha_vencimiento", { obligatorio: true, ficha: true }],
+    ["spf", { ficha: true }],
+    ["cruelty_free", { ficha: true, filtro: true }],
+    ["vegano", { ficha: true, filtro: true }],
+    ["libre_parabenos", { ficha: true, filtro: true }],
+    ["dermatologicamente_probado", { ficha: true }],
+    ["resistente_agua", { ficha: true }],
+  ],
+  perfumes: [
+    ["familia_olfativa", { ficha: true, filtro: true, catalogo: true }],
+    ["notas_salida", { ficha: true }],
+    ["notas_corazon", { ficha: true }],
+    ["notas_fondo", { ficha: true }],
+    ["concentracion", { ficha: true, filtro: true }],
+    ["contenido", { obligatorio: true, ficha: true }],
+    ["genero", { ficha: true, filtro: true, catalogo: true }],
+    ["duracion_aprox", { ficha: true }],
+  ],
+  accesorios: [
+    ["material", { ficha: true, filtro: true }],
+    ["color", { ficha: true, filtro: true, catalogo: true }],
+    ["peso", { ficha: true }],
+    ["medidas_accesorio", { ficha: true }],
+    ["tipo_cierre", { ficha: true }],
+    ["ajustable", { ficha: true }],
+  ],
+};
+function inferirBucketAtributos(categoria) {
+  const n = (categoria?.nombre || "").toLowerCase();
+  if (/(vestido)/.test(n)) return "vestidos";
+  if (/(pantal[oó]n|jean(?!s?\s*jacket))/.test(n)) return "pantalones";
+  if (/(zapato|tac[oó]n|sandalia|bota|calzado)/.test(n)) return "calzado";
+  if (/(perfume|fragancia|colonia)/.test(n)) return "perfumes";
+  if (/(maquillaje|cosm[eé]t|belleza|skincare)/.test(n)) return "maquillaje";
+  if (/(cartera|bolso|mochila|maleta|accesorio|joyer[ií]a|reloj|billetera)/.test(n)) return "accesorios";
+  if (/(tecnolog|electr[oó]n|gadget|celular|audif[oó]no|laptop|computadora)/.test(n)) return "tecnologia";
+  if (/(blusa|camisa|chaqueta|saco|abrigo|ropa|blazer|su[eé]ter|falda)/.test(n)) return "ropa";
+  const tipo = categoria?.tipo;
+  if (tipo === "calzado") return "calzado";
+  if (tipo === "belleza") return "maquillaje";
+  if (tipo === "tecnologia") return "tecnologia";
+  if (tipo === "bolsos") return "accesorios";
+  if (tipo === "ropa") return "ropa";
+  return null;
+}
+function buildAtributosConfig(bucket) {
+  const list = CATEGORY_ATTR_BUCKETS[bucket];
+  if (!list) return [];
+  return list.map(([codigo, overrides], i) => {
+    const attr = SEED_ATTRIBUTES.find((a) => a.codigo === codigo);
+    if (!attr) return null;
+    return {
+      attribute_id: attr.id, obligatorio: false, visible: true, editable: true,
+      multiple: attr.tipo_dato === "multiseleccion", ficha: false, filtro: false, catalogo: false,
+      orden: i, ...overrides,
+    };
+  }).filter(Boolean);
+}
+/* Corre en cada boot: siembra el registro global de atributos si está vacío, y
+   le asigna configuración por defecto a cualquier categoría (nueva o ya
+   existente) que todavía no tenga atributos propios. Es idempotente — nunca
+   pisa una configuración que el admin ya haya guardado. */
+async function migrateAttributesAndCategories() {
+  try {
+    const attrsSnap = await db.collection("attributes").get();
+    if (attrsSnap.empty) {
+      const batch = db.batch();
+      SEED_ATTRIBUTES.forEach((a) => { const { id, ...rest } = a; batch.set(db.collection("attributes").doc(id), rest); });
+      await batch.commit();
+    }
+    const catsSnap = await db.collection("categories").get();
+    const batch2 = db.batch();
+    let any = false;
+    catsSnap.docs.forEach((doc) => {
+      const cat = { id: doc.id, ...doc.data() };
+      if (cat.atributos_config) return;
+      const bucket = inferirBucketAtributos(cat);
+      if (!bucket) return;
+      const config = buildAtributosConfig(bucket);
+      if (!config.length) return;
+      batch2.set(doc.ref, { atributos_config: config }, { merge: true });
+      any = true;
+    });
+    if (any) await batch2.commit();
+  } catch (e) { console.error("migrateAttributesAndCategories", e); }
 }
 
 /* Helpers CRUD genéricos, ahora contra Firestore */
@@ -599,7 +862,7 @@ let authReady = false;
 auth.onAuthStateChanged((user) => {
   currentUser = user;
   authReady = true;
-  if (user) { ensureSeedData().catch((e) => console.error("ensureSeedData", e)); }
+  if (user) { ensureSeedData().then(migrateAttributesAndCategories).catch((e) => console.error("ensureSeedData", e)); }
   if (window._bootDone) renderRoute();
 });
 function isAdminRoute(hash) { return (hash === "/admin" || hash.indexOf("/admin/") === 0) && hash !== "/admin/login"; }
@@ -725,7 +988,8 @@ route("/admin/login", () => adminLoginView());
    ================================================================ */
 route("/", () => {
   const cats = [...DB.categories].sort((a, b) => (a.orden || 0) - (b.orden || 0));
-  const products = DB.products.filter((p) => p.activo !== false);
+  const productsAll = DB.products.filter((p) => p.activo !== false);
+  const products = productsAll.filter(productMatchesFilters);
   return `
   ${siteHeader()}
   <main>
@@ -749,6 +1013,7 @@ route("/", () => {
 
     <section id="catalogo" class="container" style="padding-bottom:80px;">
       <h2 class="font-display" style="font-size:20px;font-weight:600;margin-bottom:16px;">Catálogo</h2>
+      ${renderCatalogFilterPanel(productsAll)}
       <div class="product-grid">
         ${products.map((p, i) => productCard(p, i)).join("") || `<p class="muted" style="grid-column:1/-1;text-align:center;padding:60px 0;">Todavía no hay productos publicados.</p>`}
       </div>
@@ -776,9 +1041,64 @@ const TAG_COLORS = {
   "Oferta": "background:var(--gold);color:#fff;",
   "Liquidación": "background:var(--danger);color:#fff;",
 };
+/* Filtros del catálogo — se arman solo con los atributos que el admin marcó
+   "Mostrar en filtros" para la categoría de cada producto. */
+let catalogFilters = {};
+function catalogFilterableAttrs(products) {
+  const seen = new Map();
+  products.forEach((p) => {
+    const cat = findById("categories", p.category_id);
+    const atr = legacyAtributosFallback(p);
+    categoryAtributosVisibles(cat).filter((cfg) => cfg.filtro).forEach((cfg) => {
+      const val = atr[cfg.attr.codigo];
+      if (val === undefined || val === null || val === "") return;
+      if (!seen.has(cfg.attr.codigo)) seen.set(cfg.attr.codigo, { attr: cfg.attr, values: new Set() });
+      const entry = seen.get(cfg.attr.codigo);
+      if (Array.isArray(val)) val.forEach((v) => entry.values.add(v));
+      else if (cfg.attr.tipo_dato === "booleano") { if (val) entry.values.add("Sí"); }
+      else entry.values.add(String(val));
+    });
+  });
+  return [...seen.values()].filter((e) => e.values.size);
+}
+function productMatchesFilters(p) {
+  const active = Object.entries(catalogFilters).filter(([, set]) => set.size);
+  if (!active.length) return true;
+  const atr = legacyAtributosFallback(p);
+  return active.every(([codigo, set]) => {
+    const val = atr[codigo];
+    if (Array.isArray(val)) return val.some((v) => set.has(v));
+    if (typeof val === "boolean") return val && set.has("Sí");
+    return set.has(String(val ?? ""));
+  });
+}
+function renderCatalogFilterPanel(products) {
+  const attrs = catalogFilterableAttrs(products);
+  if (!attrs.length) return "";
+  const hayActivos = Object.values(catalogFilters).some((s) => s.size);
+  return `
+  <div class="flex flex-wrap gap-4 mb-4" style="padding:16px;background:var(--surface2);border-radius:var(--radius);">
+    ${attrs.map(({ attr, values }) => `
+      <div>
+        <p class="flabel" style="margin-bottom:6px;">${esc(attr.etiqueta)}</p>
+        <div class="flex flex-wrap gap-1">
+          ${[...values].sort().map((v) => `<button type="button" class="btn btn-ghost btn-sm ${catalogFilters[attr.codigo]?.has(v) ? "btn-navy" : ""}" style="padding:4px 10px;" onclick="toggleCatalogFilter('${attr.codigo}',${JSON.stringify(v)})">${esc(v)}</button>`).join("")}
+        </div>
+      </div>`).join("")}
+    ${hayActivos ? `<button type="button" class="btn-link" style="align-self:flex-end;" onclick="clearCatalogFilters()">Limpiar filtros</button>` : ""}
+  </div>`;
+}
+function toggleCatalogFilter(codigo, value) {
+  const set = catalogFilters[codigo] || (catalogFilters[codigo] = new Set());
+  if (set.has(value)) set.delete(value); else set.add(value);
+  renderRoute();
+}
+function clearCatalogFilters() { catalogFilters = {}; renderRoute(); }
 function productCard(p, i) {
   const img = p.media?.[0]?.url || "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAAMgCAIAAABwAouTAAAQQUlEQVR4nO3baYxdZR3A4TNTFpVakUjcVzBNtCZiovhhgCCCGii0ICoaASkooGKhIAharCUotRRxAYtSkGCCC+IKaCISpShuEFNjqiIRFdco2kXpMuOHSRoClqiIHf09z6c7577nvf+cZPLLOXdmZN2f1g4AUDW6rQcAgG1JCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBNCAFIE0IA0oQQgDQhBCBtu209APwDT9lz9vNmzZwYJtasXX/6iUe9ZJ8X/nv7vH/FVScd86qtvbtq9e2LL7x006ZNmzZvPv8dJ+/+tCdNHr/2hpWXfPyaYRhuuXXVnnvMGoZh3qsOmb3/Xg/8WbuPzf3pTdf8e3MC29DIuj+t3dYzwH1ticoPf/yz15608PvXX/kg9/mHxuYee/kF79zSv3/19AezGJg6PBplSnvWM58+bbtpd/9l7YlnvuewN5x+8DGnfH/V6mEYVt/+84OOPnmvw4778JWfmVy5+9jcLWdNvl5y8RXr1v/18OPPeNErT7jjF3cNw7Bm3fo9Zx89MTExuWx02ujmzZsnXz//oKMeYIz7D/DHu/989CmL5sw79fDjz/jDH++eXHbuBy87ZN6CvV/++mtvWPkfvQzAQ0gImdJu+vZt55x2wqILLjn2iDlXLz/vonPPWPCuC4Zh+OhVn3v7SfM+v2LZhy7/5NbOfesJR+70iId/6sPvOfRl+153w8phGL5603cO3G9sZGRkcsHyd7/t4GMW7HXocXPmnfrLu3575Pyzt7bV/QdYeP4lB++/92cvXXroy/Y97+IrhmG4Z+PGXXZ+1OcuPf+y8xeeteSi/+x1AB46viNkKtqwcdOceafes3HjbatWj73guT+548477rxr8q31f/3b5vHxs+cfd82Xv/aVr39rzbr19z99fGL83j/Ofem+J5z57hOPOvz6G29+09Gv2HL8vcuvXPD61xz36jkjIyO7j8294n2LtjbP127+7n0G+MYtty5bePIwDK+Yvf+B+40NwzAxMXHEIQcMw7DbU5/0lzXrHuwlAP5bhJCpaIftt/vspUuHYfjRT+6Y/bpTHvawHT9x0bk77rjD+PjELbeumjY6Ou+0xQe9eOzYI+Zc/qkvTJ6yJX5/XrN2w8ZN997tiY/bdXRk9Ne/+8Odv/rtrJm7bTm+8ju3fWTJWVtuEB/Aps3j9xlg8/j4MDExDMO00dEZ03eanPlRj5w+uf6f2ROYIjwaZUp79M4znvbkx7/guc/+0uSzzZXfvnDFVcMw3PbDHx9ywD73bNiwYcPGyZUzpu+0+vafD8Nw9bU3bOnQ+MT4+PjEMAxzXrLPwqXL9xt7/r03f8Jjd/3eD370z4xx/wGeN2vmdTfePAzDlZ+57pz3rxiGYXTEbxP8T3JHyFQ0+Wh0dHRkGIal75i/6y6PXrD4fR/79Be3mzZt8oHkMa+cfeCR85898xkzHjl9w4aNO+yw/bmnv/HY0855zC477zFr5o7bbz+5zwv3eM5r37Lw4x9YfPABe5+15OIz3/y6e3/KsrNPXrTsI8MwjI6O7PbUrf7t6DAMi089/j4DvGvBG+a/c9mKT3x+xvSdPnjOWx+i6wD8F/j3CRJ+9Zvfn3T20quXn7etBwGmHHeE/P+7/sZvLrn4igsXLdjWgwBTkTtCANJ8vQ9AmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKT9He09o62xKyCcAAAAAElFTkSuQmCC";
   const agotado = (p.stock || 0) <= 0;
+  const catalogBadges = categoryAtributosVisibles(findById("categories", p.category_id)).filter((cfg) => cfg.catalogo)
+    .map((cfg) => formatAtributoValor(cfg.attr, legacyAtributosFallback(p)[cfg.attr.codigo])).filter(Boolean).slice(0, 3);
   return `
   <a href="#/producto/${p.slug}" class="product-card animate-fade-in-up" style="animation-delay:${(i || 0) * 60}ms">
     <div class="thumb">
@@ -790,6 +1110,7 @@ function productCard(p, i) {
       <p class="cat">${esc(p.categoria || "")}</p>
       <h3>${esc(p.nombre)}</h3>
       <p class="price">${money(p.precio_venta)}</p>
+      ${catalogBadges.length ? `<div class="flex flex-wrap gap-1 mt-1">${catalogBadges.map((b) => `<span class="badge" style="font-size:10px;">${esc(b)}</span>`).join("")}</div>` : ""}
     </div>
   </a>`;
 }
@@ -800,7 +1121,8 @@ function productCard(p, i) {
 route("/categoria/:slug", ({ slug }) => {
   const cat = DB.categories.find((c) => c.slug === slug);
   if (!cat || !cat.activa) return notFoundView();
-  const products = DB.products.filter((p) => p.activo !== false && (p.category_id === cat.id || p.categoria === cat.nombre));
+  const productsAll = DB.products.filter((p) => p.activo !== false && (p.category_id === cat.id || p.categoria === cat.nombre));
+  const products = productsAll.filter(productMatchesFilters);
   return `
   ${siteHeader()}
   <main>
@@ -813,11 +1135,11 @@ route("/categoria/:slug", ({ slug }) => {
       </div>
     </section>
 
-    ${products.length ? `
+    ${productsAll.length ? `
     <section style="padding:24px 0;">
       <h2 class="font-display container" style="font-size:17px;font-weight:600;margin-bottom:10px;">Desliza para ver más</h2>
       <div class="snap-row container-lg" style="padding-left:20px;padding-right:20px;">
-        ${products.map((p) => `
+        ${productsAll.map((p) => `
           <a href="#/producto/${p.slug}" class="snap-item product-card">
             <div class="thumb"><img src="${esc(p.media?.[0]?.url || "data:image/png;base64,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QghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKT9He09o62xKyCcAAAAAElFTkSuQmCC")}" alt="${esc(p.nombre)}"></div>
             <div class="body"><h3>${esc(p.nombre)}</h3><p class="price">${money(p.precio_venta)}</p></div>
@@ -827,6 +1149,7 @@ route("/categoria/:slug", ({ slug }) => {
 
     <section class="container" style="padding-bottom:80px;">
       <h2 class="font-display" style="font-size:17px;font-weight:600;margin-bottom:16px;">Todo en ${esc(cat.nombre)}</h2>
+      ${renderCatalogFilterPanel(productsAll)}
       <div class="product-grid">
         ${products.map((p, i) => productCard(p, i)).join("") || `<p class="muted" style="grid-column:1/-1;text-align:center;padding:60px 0;">Todavía no hay productos en esta categoría.</p>`}
       </div>
@@ -840,9 +1163,10 @@ route("/categoria/:slug", ({ slug }) => {
 let pdState = null;
 function ensurePdState(product) {
   if (!pdState || pdState.productId !== product.id) {
+    const atr = legacyAtributosFallback(product);
     pdState = {
       productId: product.id, activeMedia: 0, zoomed: false,
-      talla: product.tallas?.[0] || "", color: product.colores?.[0] || "",
+      talla: atr.talla?.[0] || "", color: atr.color?.[0] || "",
       zonaId: DB.delivery_zones.find((z) => z.activa)?.id || "",
       fechaEntrega: todayStr(),
       metodoPago: "transferencia", comprobante: null, comprobanteNombre: "",
@@ -918,8 +1242,11 @@ function productFormView(product, st) {
   const stockInfo = stockStateOf(product);
   const media = product.media?.length ? product.media : [{ url: "data:image/png;base64,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QghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKQJIQBpQghAmhACkCaEAKT9He09o62xKyCcAAAAAElFTkSuQmCC", tipo: "imagen", vista: null }];
   const activeMedia = media[st.activeMedia] || media[0];
-  const medidas = product.medidas || {};
-  const tieneMedidas = Object.values(medidas).some((v) => v !== "" && v != null);
+  const productAtributos = legacyAtributosFallback(product);
+  const categoriaObj = findById("categories", product.category_id);
+  const atributosFicha = categoryAtributosVisibles(categoriaObj).filter((cfg) => cfg.ficha && !cfg.attr.es_variante)
+    .map((cfg) => ({ cfg, texto: formatAtributoValor(cfg.attr, productAtributos[cfg.attr.codigo]) }))
+    .filter((x) => x.texto);
   const requiereComprobante = st.metodoPago === "transferencia" || st.metodoPago === "deposito";
   const agotado = (product.stock || 0) <= 0;
 
@@ -950,30 +1277,29 @@ function productFormView(product, st) {
           <span class="stock-badge ${stockInfo.cls}">${stockInfo.label}</span>
         </div>
         <p class="muted mt-3" style="font-size:14px;line-height:1.6;">${esc(product.descripcion || "")}</p>
-        ${product.material ? `<p style="font-size:14px;margin-top:8px;"><b>Material:</b> ${esc(product.material)}</p>` : ""}
 
-        ${tieneMedidas ? `
+        ${atributosFicha.length ? `
         <div class="measures-box">
-          <p class="flabel" style="margin-bottom:8px;">Guía de tallas / medidas</p>
+          <p class="flabel" style="margin-bottom:8px;">Detalles del producto</p>
           <div class="measures-grid">
-            ${Object.entries(medidas).filter(([, v]) => v).map(([k, v]) => `<div>${esc(MEDIDA_LABELS[k] || k)}: <b>${esc(v)}</b></div>`).join("")}
+            ${atributosFicha.map(({ cfg, texto }) => `<div>${esc(cfg.attr.etiqueta)}: <b>${esc(texto)}</b></div>`).join("")}
           </div>
         </div>` : ""}
 
         <form onsubmit="pdSubmit(event, '${product.id}')" style="margin-top:24px;">
-          ${product.tallas?.length ? `
+          ${productAtributos.talla?.length ? `
           <div class="field">
             <label class="flabel">Talla</label>
             <div class="chip-select">
-              ${product.tallas.map((t) => `<button type="button" class="${st.talla === t ? "active" : ""}" onclick="pdSetField('talla','${esc(t)}')">${esc(t)}</button>`).join("")}
+              ${productAtributos.talla.map((t) => `<button type="button" class="${st.talla === t ? "active" : ""}" onclick="pdSetField('talla','${esc(t)}')">${esc(t)}</button>`).join("")}
             </div>
           </div>` : ""}
 
-          ${product.colores?.length ? `
+          ${productAtributos.color?.length ? `
           <div class="field">
             <label class="flabel">Color</label>
             <div class="chip-select">
-              ${product.colores.map((c) => `<button type="button" class="${st.color === c ? "active rose" : ""}" onclick="pdSetField('color','${esc(c)}')">${esc(c)}</button>`).join("")}
+              ${productAtributos.color.map((c) => `<button type="button" class="${st.color === c ? "active rose" : ""}" onclick="pdSetField('color','${esc(c)}')">${esc(c)}</button>`).join("")}
             </div>
           </div>` : ""}
 
@@ -1133,6 +1459,7 @@ const ADMIN_NAV = [
   { href: "#/admin/dashboard", label: "Resumen General" },
   { href: "#/admin/productos", label: "Productos" },
   { href: "#/admin/categorias", label: "Categorías" },
+  { href: "#/admin/atributos", label: "Atributos" },
   { href: "#/admin/compras", label: "Compras" },
   { href: "#/admin/ventas", label: "Ventas" },
   { href: "#/admin/reservas", label: "Centro de reservas" },
@@ -1288,8 +1615,7 @@ function openProductModal(id) {
   productModalState = {
     editingId: id || null,
     media: p ? [...(p.media || [])] : [],
-    colores: p ? [...(p.colores || [])] : [],
-    tallas: p ? [...(p.tallas || [])] : [],
+    atributos: legacyAtributosFallback(p),
   };
   renderProductModal();
 }
@@ -1298,29 +1624,10 @@ function syncProductFieldsFromDOM() {
   if (!g("pm_nombre")) return;
   st.nombre = g("pm_nombre").value; st.category_id = g("pm_categoria").value;
   st.etiqueta = g("pm_etiqueta").value; st.costo_compra = g("pm_costo").value; st.precio_venta = g("pm_precio").value;
-  st.stock = g("pm_stock").value; st.material = getMaterialValue(); st.descripcion = g("pm_descripcion").value;
-  st.medidas = collectMedidas();
+  st.stock = g("pm_stock").value; st.descripcion = g("pm_descripcion").value;
+  syncAtributosFromDOM(findById("categories", g("pm_categoria").value));
 }
 const VISTAS_MEDIA = ["frontal", "lateral", "trasera", "tela", "puesta"];
-/* Campos de medidas y materiales según la categoría — no todas las categorías se miden igual. */
-const MEDIDA_LABELS = {
-  busto: "Busto (cm)", cintura: "Cintura (cm)", cadera: "Cadera (cm)", largo: "Largo (cm)", manga: "Manga (cm)",
-  talla: "Talla (EU)", ancho: "Ancho de horma (cm)", altura_tacon: "Altura de tacón (cm)",
-  alto: "Alto (cm)", profundidad: "Profundidad (cm)",
-};
-const MEDIDAS_POR_CATEGORIA = {
-  "Blusas": [["busto", "Busto"], ["cintura", "Cintura"], ["largo", "Largo"], ["manga", "Manga"]],
-  "Vestidos": [["busto", "Busto"], ["cintura", "Cintura"], ["cadera", "Cadera"], ["largo", "Largo"]],
-  "Pantalones": [["cintura", "Cintura"], ["cadera", "Cadera"], ["largo", "Largo"]],
-  "Zapatos": [["talla", "Talla (EU)"], ["ancho", "Ancho de horma (cm)"]],
-  "Tacones": [["talla", "Talla (EU)"], ["altura_tacon", "Altura de tacón (cm)"]],
-  "Carteras": [["ancho", "Ancho (cm)"], ["alto", "Alto (cm)"], ["profundidad", "Profundidad (cm)"]],
-};
-const MATERIALES_ROPA = [
-  "Algodón", "Poliéster", "Lino", "Seda", "Lycra / Elastano", "Mezclilla (denim)", "Rayón",
-  "Viscosa", "Chifón", "Encaje", "Punto (jersey)", "Lana", "Franela", "Terciopelo", "Satín", "Cuero sintético",
-];
-const MATERIALES_CALZADO = ["Cuero genuino", "Cuero sintético (PU)", "Gamuza", "Charol", "Lona / Tela", "Malla", "Sintético", "Goma / Caucho"];
 
 /* Cada categoría tiene un "tipo de producto" (elegido al crearla) que define sus
    medidas/materiales — así una categoría nueva (Chaquetas, Ropa de hombre, etc.)
@@ -1339,44 +1646,111 @@ function inferirTipoCategoria(nombre) {
   return "otro";
 }
 function tipoDeCategoria(categoria) { return categoria?.tipo || inferirTipoCategoria(categoria?.nombre); }
-const MEDIDAS_POR_TIPO = {
-  ropa: [["busto", "Busto"], ["cintura", "Cintura"], ["cadera", "Cadera"], ["largo", "Largo"], ["manga", "Manga"]],
-  calzado: [["talla", "Talla (EU)"], ["ancho", "Ancho de horma (cm)"], ["altura_tacon", "Altura de tacón (cm)"]],
-  bolsos: [["ancho", "Ancho (cm)"], ["alto", "Alto (cm)"], ["profundidad", "Profundidad (cm)"]],
-};
-const TALLAS_SUGERIDAS_POR_TIPO = {
-  ropa: ["XS", "S", "M", "L", "XL", "XXL"],
-  calzado: ["35", "36", "37", "38", "39", "40", "41", "42"],
-};
-const TALLA_PLACEHOLDER_POR_TIPO = { ropa: "Ej. M", calzado: "Ej. 38" };
-const MATERIALES_POR_TIPO = {
-  ropa: MATERIALES_ROPA,
-  calzado: MATERIALES_CALZADO,
-  bolsos: ["Cuero genuino", "Cuero sintético", "Lona", "Nylon", "Yute", "Sintético"],
-  belleza: ["Polvo", "Líquido", "Crema", "Gel", "Barra / Stick", "Aerosol / Spray"],
-  tecnologia: ["Plástico (ABS/Policarbonato)", "Metal (aluminio)", "Vidrio templado", "Silicona", "Fibra de carbono", "Cuero sintético"],
-};
-function medidasFieldsHtml(tipoProducto, medidas) {
-  const campos = MEDIDAS_POR_TIPO[tipoProducto];
-  if (!campos) return "";
-  return `
-    <div class="field">
-      <label class="flabel">Guía de tallas / medidas</label>
-      <div class="field-row" style="grid-template-columns:repeat(${campos.length},1fr);">
-        ${campos.map(([key, label]) => `<input id="pm_med_${key}" type="number" step="0.01" placeholder="${esc(label)}" value="${esc(medidas[key] || "")}">`).join("")}
-      </div>
+
+/* Render dinámico de atributos en el formulario de producto — reemplaza los
+   bloques fijos de medidas/material/colores/tallas de antes. Qué atributos
+   aparecen (y si son obligatorios/editables/múltiples) sale 100% de
+   categoria.atributos_config, configurado desde /admin/categorias. */
+function categoryAtributosVisibles(categoria) {
+  const config = categoria?.atributos_config || [];
+  return config.filter((c) => c.visible !== false)
+    .map((c) => ({ ...c, attr: attributeById(c.attribute_id) }))
+    .filter((c) => c.attr)
+    .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+}
+/* Compatibilidad con productos creados antes de este sistema: si el producto
+   no tiene valores en `atributos` para talla/color/material/cintura/cadera
+   pero sí tiene los campos viejos, se usan como valor inicial. No se borra
+   ni se modifica el dato viejo en Firestore. */
+function legacyAtributosFallback(p) {
+  if (!p) return {};
+  const out = { ...(p.atributos || {}) };
+  if (out.talla === undefined && Array.isArray(p.tallas) && p.tallas.length) out.talla = [...p.tallas];
+  if (out.color === undefined && Array.isArray(p.colores) && p.colores.length) out.color = [...p.colores];
+  if (out.material === undefined && p.material) out.material = p.material;
+  if (out.cintura === undefined && p.medidas?.cintura !== undefined && p.medidas.cintura !== "") out.cintura = parseFloat(p.medidas.cintura);
+  if (out.cadera === undefined && p.medidas?.cadera !== undefined && p.medidas.cadera !== "") out.cadera = parseFloat(p.medidas.cadera);
+  return out;
+}
+function formatAtributoValor(attr, valor) {
+  if (valor === undefined || valor === null || valor === "") return null;
+  if (attr.tipo_dato === "booleano") return valor ? "Sí" : null;
+  if (attr.tipo_dato === "multiseleccion") return Array.isArray(valor) && valor.length ? valor.join(", ") : null;
+  if (attr.tipo_dato === "numero") return `${valor}${attr.unidad ? " " + attr.unidad : ""}`;
+  return String(valor);
+}
+function pmAtributoInputHtml(cfg, currentValue) {
+  const a = cfg.attr;
+  const id = `pm_attr_${a.codigo}`;
+  const req = cfg.obligatorio ? "required" : "";
+  const dis = cfg.editable === false ? "disabled" : "";
+  const label = `${esc(a.etiqueta)}${a.unidad ? ` (${esc(a.unidad)})` : ""}${cfg.obligatorio ? " *" : ""}`;
+  if (a.tipo_dato === "booleano") {
+    return `<div class="field"><label class="flex items-center gap-2" style="font-size:13px;"><input type="checkbox" id="${id}" ${currentValue ? "checked" : ""} ${dis}> ${label}</label></div>`;
+  }
+  if (a.tipo_dato === "fecha") {
+    return `<div class="field"><label class="flabel">${label}</label><input type="date" id="${id}" value="${esc(currentValue || "")}" ${req} ${dis}></div>`;
+  }
+  if (a.tipo_dato === "numero") {
+    return `<div class="field"><label class="flabel">${label}</label><input type="number" step="0.01" id="${id}" value="${esc(currentValue ?? "")}" ${req} ${dis}></div>`;
+  }
+  if (a.tipo_dato === "multiseleccion") {
+    const values = Array.isArray(currentValue) ? currentValue : [];
+    if (a.opciones?.length) {
+      return `<div class="field"><label class="flabel">${label}</label>
+        <div class="flex flex-wrap gap-1">
+          ${a.opciones.map((o) => `<button type="button" class="btn btn-ghost btn-sm ${values.includes(o) ? "btn-navy" : ""}" style="padding:4px 10px;" onclick="pmToggleMultiOpcion('${a.codigo}',${JSON.stringify(o)})">${esc(o)}</button>`).join("")}
+        </div></div>`;
+    }
+    return `<div class="field">
+      <label class="flabel">${label}</label>
+      <div class="flex flex-wrap gap-2 mb-2">${values.map((v, i) => `<span class="tag">${esc(v)} <button type="button" onclick="pmRemoveAtributoTag('${a.codigo}',${i})">×</button></span>`).join("")}</div>
+      <div class="flex gap-2"><input id="${id}_tagInput" placeholder="Ej. ${a.codigo === "talla" ? "M" : "Nuevo valor"}"><button type="button" class="btn btn-ghost btn-sm" onclick="pmAddAtributoTag('${a.codigo}')">+</button></div>
     </div>`;
+  }
+  if (a.tipo_dato === "seleccion" && a.opciones?.length) {
+    const valorFueraDeLista = currentValue && !a.opciones.includes(currentValue);
+    return `<div class="field"><label class="flabel">${label}</label><select id="${id}" ${req} ${dis}>
+      <option value="">Selecciona...</option>
+      ${valorFueraDeLista ? `<option selected>${esc(currentValue)}</option>` : ""}
+      ${a.opciones.map((o) => `<option ${currentValue === o ? "selected" : ""}>${esc(o)}</option>`).join("")}
+    </select></div>`;
+  }
+  return `<div class="field"><label class="flabel">${label}</label><input id="${id}" value="${esc(currentValue || "")}" ${req} ${dis}></div>`;
 }
-function collectMedidas() {
-  const medidas = {};
-  document.querySelectorAll('[id^="pm_med_"]').forEach((el) => { medidas[el.id.replace("pm_med_", "")] = el.value; });
-  return medidas;
+function pmToggleMultiOpcion(codigo, opcion) {
+  syncProductFieldsFromDOM();
+  const arr = productModalState.atributos[codigo] || (productModalState.atributos[codigo] = []);
+  const i = arr.indexOf(opcion);
+  if (i >= 0) arr.splice(i, 1); else arr.push(opcion);
+  renderProductModal();
 }
-function getMaterialValue() {
-  const sel = document.getElementById("pm_material");
-  if (!sel) return "";
-  if (sel.value === "Otro") return document.getElementById("pm_material_otro")?.value || "";
-  return sel.value || "";
+function pmAddAtributoTag(codigo) {
+  syncProductFieldsFromDOM();
+  const input = document.getElementById(`pm_attr_${codigo}_tagInput`);
+  const v = input.value.trim();
+  if (!v) return;
+  const arr = productModalState.atributos[codigo] || (productModalState.atributos[codigo] = []);
+  arr.push(v);
+  renderProductModal();
+}
+function pmRemoveAtributoTag(codigo, i) {
+  syncProductFieldsFromDOM();
+  productModalState.atributos[codigo].splice(i, 1);
+  renderProductModal();
+}
+/* Lee del DOM los valores de los campos NO reactivos (texto/número/booleano/fecha/selección
+   única) y los guarda en el estado — las multiselecciones ya viven ahí desde que se tocan. */
+function syncAtributosFromDOM(categoria) {
+  categoryAtributosVisibles(categoria).forEach((cfg) => {
+    const a = cfg.attr;
+    if (a.tipo_dato === "multiseleccion") return;
+    const el = document.getElementById(`pm_attr_${a.codigo}`);
+    if (!el) return;
+    if (a.tipo_dato === "booleano") productModalState.atributos[a.codigo] = el.checked;
+    else if (a.tipo_dato === "numero") productModalState.atributos[a.codigo] = el.value === "" ? "" : parseFloat(el.value);
+    else productModalState.atributos[a.codigo] = el.value;
+  });
 }
 function pmUpdatePrecioSugerido() {
   const hint = document.getElementById("pm_precio_sugerido");
@@ -1391,13 +1765,9 @@ function renderProductModal() {
   const st = productModalState;
   const p = st.editingId ? findById("products", st.editingId) : null;
   const val = (field, def) => (st[field] !== undefined ? st[field] : (p ? p[field] : def)) ?? def;
-  const medidas = st.medidas || p?.medidas || {};
   const categoryId = val("category_id", p?.category_id ?? DB.categories[0]?.id);
   const categoriaObj = findById("categories", categoryId);
-  const tipoProducto = tipoDeCategoria(categoriaObj);
-  const materialOpciones = MATERIALES_POR_TIPO[tipoProducto] || [];
-  const materialActual = val("material", "");
-  const materialEsOtro = !!materialActual && !materialOpciones.includes(materialActual);
+  const atributosConfig = categoryAtributosVisibles(categoriaObj);
   openModal(`
     <h3>${st.editingId ? "Editar producto" : "Nuevo producto"}</h3>
     <div class="field">
@@ -1440,36 +1810,12 @@ function renderProductModal() {
         <p class="muted" id="pm_precio_sugerido" style="font-size:11px;margin-top:4px;"></p>
       </div>
     </div>
-    <div class="field-row">
-      <div class="field"><label class="flabel">Stock</label><input id="pm_stock" type="number" required value="${esc(val("stock", 0))}"></div>
-      <div class="field">
-        <label class="flabel">Material</label>
-        <select id="pm_material" onchange="document.getElementById('pm_material_otro').classList.toggle('hidden', this.value !== 'Otro')">
-          <option value="">Selecciona...</option>
-          ${materialOpciones.map((m) => `<option ${materialActual === m ? "selected" : ""}>${esc(m)}</option>`).join("")}
-          <option value="Otro" ${materialEsOtro ? "selected" : ""}>Otro (especificar)</option>
-        </select>
-        <input id="pm_material_otro" placeholder="Especifica el material" class="mt-2 ${materialEsOtro ? "" : "hidden"}" value="${esc(materialEsOtro ? materialActual : "")}">
-      </div>
-    </div>
+    <div class="field"><label class="flabel">Stock</label><input id="pm_stock" type="number" required value="${esc(val("stock", 0))}"></div>
     <div class="field"><label class="flabel">Descripción</label><textarea id="pm_descripcion" rows="2">${esc(val("descripcion", ""))}</textarea></div>
-    ${medidasFieldsHtml(tipoProducto, medidas)}
-    <div class="field-row">
-      <div class="field">
-        <label class="flabel">Colores disponibles</label>
-        <div class="flex flex-wrap gap-2 mb-2">${st.colores.map((c, i) => `<span class="tag">${esc(c)} <button type="button" onclick="pmRemoveTag('colores',${i})">×</button></span>`).join("")}</div>
-        <div class="flex gap-2"><input id="pm_colorInput" placeholder="Ej. Negro"><button type="button" class="btn btn-ghost btn-sm" onclick="pmAddTag('colores')">+</button></div>
-      </div>
-      <div class="field">
-        <label class="flabel">Tallas disponibles</label>
-        <div class="flex flex-wrap gap-2 mb-2">${st.tallas.map((t, i) => `<span class="tag">${esc(t)} <button type="button" onclick="pmRemoveTag('tallas',${i})">×</button></span>`).join("")}</div>
-        ${(TALLAS_SUGERIDAS_POR_TIPO[tipoProducto] || []).length ? `
-        <div class="flex flex-wrap gap-1 mb-2">
-          ${TALLAS_SUGERIDAS_POR_TIPO[tipoProducto].map((t) => `<button type="button" class="btn btn-ghost btn-sm" style="padding:4px 10px;" onclick="pmAddSuggestedTalla('${esc(t)}')">${esc(t)}</button>`).join("")}
-        </div>` : ""}
-        <div class="flex gap-2"><input id="pm_tallaInput" placeholder="${TALLA_PLACEHOLDER_POR_TIPO[tipoProducto] || "Ej. Talla"}"><button type="button" class="btn btn-ghost btn-sm" onclick="pmAddTag('tallas')">+</button></div>
-      </div>
-    </div>
+    ${atributosConfig.length ? `
+    <h4 style="margin:16px 0 8px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Atributos de ${esc(categoriaObj?.nombre || "la categoría")}</h4>
+    ${atributosConfig.map((cfg) => pmAtributoInputHtml(cfg, st.atributos[cfg.attr.codigo])).join("")}
+    ` : `<p class="muted" style="font-size:12px;">Esta categoría no tiene atributos configurados. Podés asignarle desde <a href="#/admin/categorias" style="text-decoration:underline;font-weight:700;">Categorías</a>.</p>`}
     <div class="modal-actions">
       <button class="btn btn-rose" onclick="saveProduct()">${st.editingId ? "Guardar cambios" : "Crear producto"}</button>
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
@@ -1489,20 +1835,6 @@ async function pmAddMedia(e) {
 }
 function pmRemoveMedia(i) { syncProductFieldsFromDOM(); productModalState.media.splice(i, 1); renderProductModal(); }
 function pmSetVista(i, v) { syncProductFieldsFromDOM(); productModalState.media[i].vista = v || null; renderProductModal(); }
-function pmAddTag(field) {
-  syncProductFieldsFromDOM();
-  const input = document.getElementById(field === "colores" ? "pm_colorInput" : "pm_tallaInput");
-  const v = input.value.trim();
-  if (!v) return;
-  productModalState[field].push(v);
-  renderProductModal();
-}
-function pmRemoveTag(field, i) { syncProductFieldsFromDOM(); productModalState[field].splice(i, 1); renderProductModal(); }
-function pmAddSuggestedTalla(t) {
-  syncProductFieldsFromDOM();
-  if (!productModalState.tallas.includes(t)) productModalState.tallas.push(t);
-  renderProductModal();
-}
 async function saveProduct() {
   const st = productModalState, g = (id) => document.getElementById(id).value;
   const nombreEl = document.getElementById("pm_nombre");
@@ -1515,12 +1847,19 @@ async function saveProduct() {
     return;
   }
   const category = findById("categories", g("pm_categoria"));
+  syncAtributosFromDOM(category);
+  const atributosConfig = categoryAtributosVisibles(category);
+  for (const cfg of atributosConfig) {
+    if (!cfg.obligatorio) continue;
+    const v = st.atributos[cfg.attr.codigo];
+    const vacio = cfg.attr.tipo_dato === "multiseleccion" ? !Array.isArray(v) || v.length === 0 : v === undefined || v === null || v === "";
+    if (vacio) { toast(`"${cfg.attr.etiqueta}" es obligatorio`); return; }
+  }
   const data = {
     nombre, category_id: g("pm_categoria"), categoria: category?.nombre || "",
     etiqueta: g("pm_etiqueta"), costo_compra: parseFloat(g("pm_costo")) || 0, precio_venta: parseFloat(g("pm_precio")) || 0,
-    stock: parseInt(g("pm_stock")) || 0, material: getMaterialValue(), descripcion: g("pm_descripcion"),
-    medidas: collectMedidas(),
-    colores: st.colores, tallas: st.tallas, media: st.media,
+    stock: parseInt(g("pm_stock")) || 0, descripcion: g("pm_descripcion"),
+    atributos: { ...st.atributos }, media: st.media,
   };
   const btn = document.querySelector(".modal .btn-rose");
   const btnTextoOriginal = btn ? btn.textContent : "";
@@ -1562,6 +1901,7 @@ route("/admin/categorias", () => {
           <button class="btn-link" onclick="editingCategoryId=null;renderRoute();">Cancelar</button>
         </div>` : `<button class="btn-link" style="font-weight:700;" onclick="editingCategoryId='${c.id}';renderRoute();">${esc(c.nombre)} <span class="muted" style="font-size:11px;font-weight:400;">(${(TIPOS_PRODUCTO.find(([v]) => v === tipoDeCategoria(c)) || [])[1] || ""})</span></button>`}
       <div class="flex items-center gap-3">
+        <button class="btn-link" onclick="openCategoryAttributesModal('${c.id}')">Atributos (${(c.atributos_config || []).length})</button>
         <button class="badge ${c.activa ? "badge-ok" : "badge-low"}" onclick="toggleCategoria('${c.id}')">${c.activa ? "Activa" : "Desactivada"}</button>
         <button class="btn-danger-text" onclick="deleteCategoria('${c.id}')">Eliminar</button>
       </div>
@@ -1605,6 +1945,144 @@ function toggleCategoria(id) { const c = findById("categories", id); crudUpdate(
 function deleteCategoria(id) {
   if (!confirmar("¿Eliminar esta categoría?")) return;
   crudDelete("categories", id); toast("Categoría eliminada"); renderRoute();
+}
+
+/* Configuración de atributos por categoría: qué atributos globales aplican acá
+   y con qué comportamiento (obligatorio, visible, editable, múltiple, dónde se muestra). */
+let catAttrModalState = null;
+function openCategoryAttributesModal(categoryId) {
+  const cat = findById("categories", categoryId);
+  const existing = cat?.atributos_config || [];
+  const items = DB.attributes.map((a, i) => {
+    const cfg = existing.find((c) => c.attribute_id === a.id);
+    return {
+      attribute_id: a.id, checked: !!cfg,
+      obligatorio: cfg?.obligatorio || false, visible: cfg ? cfg.visible !== false : true,
+      editable: cfg ? cfg.editable !== false : true, multiple: cfg ? !!cfg.multiple : a.tipo_dato === "multiseleccion",
+      ficha: cfg?.ficha || false, filtro: cfg?.filtro || false, catalogo: cfg?.catalogo || false,
+      orden: cfg?.orden ?? i,
+    };
+  });
+  catAttrModalState = { categoryId, items };
+  renderCategoryAttributesModal();
+}
+function renderCategoryAttributesModal() {
+  const st = catAttrModalState;
+  const cat = findById("categories", st.categoryId);
+  const rows = [...DB.attributes].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta)).map((a) => {
+    const idx = st.items.findIndex((it) => it.attribute_id === a.id);
+    const it = st.items[idx];
+    const chk = (field, label) => `<label class="flex items-center gap-1"><input type="checkbox" ${it[field] ? "checked" : ""} onchange="catAttrSet(${idx},'${field}',this.checked)"> ${label}</label>`;
+    return `
+    <div style="border-bottom:1px solid var(--border);padding:10px 0;">
+      <label class="flex items-center gap-2" style="font-weight:700;font-size:13px;">
+        <input type="checkbox" ${it.checked ? "checked" : ""} onchange="catAttrToggle(${idx})"> ${esc(a.etiqueta)}
+        <span class="muted" style="font-weight:400;font-size:11px;">(${(TIPOS_DATO_ATRIBUTO.find(([v]) => v === a.tipo_dato) || [])[1] || a.tipo_dato})</span>
+      </label>
+      ${it.checked ? `
+      <div class="flex flex-wrap gap-3" style="margin:8px 0 0 24px;font-size:12px;">
+        ${chk("obligatorio", "Obligatorio")}${chk("visible", "Visible")}${chk("editable", "Editable")}${chk("multiple", "Múltiples valores")}${chk("ficha", "Mostrar en ficha")}${chk("filtro", "Mostrar en filtros")}${chk("catalogo", "Mostrar en catálogo")}
+      </div>` : ""}
+    </div>`;
+  }).join("");
+  openModal(`
+    <h3>Atributos de "${esc(cat?.nombre || "")}"</h3>
+    <p class="muted" style="font-size:12px;margin-bottom:10px;">Marcá los atributos que aplican a esta categoría — los que no marques no van a aparecer al crear productos de esta categoría (no aplica).</p>
+    <div style="max-height:50vh;overflow-y:auto;">${rows || `<p class="muted text-center" style="padding:20px;">Todavía no hay atributos creados. Creá alguno primero en <a href="#/admin/atributos">Atributos</a>.</p>`}</div>
+    <div class="modal-actions">
+      <button class="btn btn-rose" onclick="saveCategoryAttributes()">Guardar</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+    </div>`);
+}
+function catAttrToggle(idx) { catAttrModalState.items[idx].checked = !catAttrModalState.items[idx].checked; renderCategoryAttributesModal(); }
+function catAttrSet(idx, field, value) { catAttrModalState.items[idx][field] = value; renderCategoryAttributesModal(); }
+function saveCategoryAttributes() {
+  const st = catAttrModalState;
+  const config = st.items.filter((it) => it.checked).map(({ checked, ...rest }) => rest);
+  crudUpdate("categories", st.categoryId, { atributos_config: config });
+  closeModal(); toast("Atributos guardados"); catAttrModalState = null; renderRoute();
+}
+
+/* ================================================================
+   ATRIBUTOS — registro global (reutilizable entre categorías, no requiere
+   tocar código: se crea, edita y elimina todo desde acá).
+   ================================================================ */
+function attributeById(id) { return findById("attributes", id); }
+route("/admin/atributos", () => {
+  const rows = [...DB.attributes].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta)).map((a) => `
+    <tr>
+      <td style="font-weight:700;">${esc(a.etiqueta)}</td>
+      <td><code style="font-size:12px;">${esc(a.codigo)}</code></td>
+      <td>${(TIPOS_DATO_ATRIBUTO.find(([v]) => v === a.tipo_dato) || [])[1] || a.tipo_dato}${a.unidad ? ` · ${esc(a.unidad)}` : ""}</td>
+      <td>${a.es_variante ? `<span class="badge badge-ok">Variante</span>` : ""}</td>
+      <td class="row-actions">
+        <button class="btn-link" onclick="openAttributeModal('${a.id}')">Editar</button>
+        <button class="btn-danger-text" onclick="deleteAttribute('${a.id}')">Eliminar</button>
+      </td>
+    </tr>`).join("");
+  return adminLayout("#/admin/atributos", "Catálogo", "Atributos", `
+    <p class="muted mb-3" style="font-size:13px;">Registro global de atributos (Talla, Procesador, SPF, etc.). Para que aparezcan al crear un producto, asignalos a la categoría correspondiente desde <a href="#/admin/categorias" style="text-decoration:underline;font-weight:700;">Categorías</a>.</p>
+    <button class="btn btn-navy mb-4" onclick="openAttributeModal(null)">+ Nuevo atributo</button>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Etiqueta</th><th>Código</th><th>Tipo de dato</th><th></th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="muted text-center" style="padding:40px;">Sin atributos todavía.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `);
+});
+function openAttributeModal(id) {
+  const a = id ? attributeById(id) : null;
+  openModal(`
+    <h3>${a ? "Editar atributo" : "Nuevo atributo"}</h3>
+    <div class="field"><label class="flabel">Etiqueta</label><input id="attr_etiqueta" placeholder="Ej. Procesador" value="${esc(a?.etiqueta || "")}"></div>
+    <div class="field"><label class="flabel">Código interno</label><input id="attr_codigo" placeholder="Ej. procesador" value="${esc(a?.codigo || "")}" ${a ? "readonly disabled style=\"background:var(--surface2);color:var(--muted);\"" : ""}>
+      <p class="muted" style="font-size:11px;margin-top:4px;">${a ? "El código no se puede cambiar una vez creado." : "Se usa internamente para guardar el valor en cada producto. Solo minúsculas y guiones bajos."}</p>
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Tipo de dato</label>
+        <select id="attr_tipo_dato" onchange="document.getElementById('attr_opciones_wrap').classList.toggle('hidden', !['seleccion','multiseleccion'].includes(this.value))">
+          ${TIPOS_DATO_ATRIBUTO.map(([v, l]) => `<option value="${v}" ${(a?.tipo_dato || "texto") === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field"><label class="flabel">Unidad (opcional)</label><input id="attr_unidad" placeholder="Ej. cm, GB, ml" value="${esc(a?.unidad || "")}"></div>
+    </div>
+    <div class="field ${["seleccion", "multiseleccion"].includes(a?.tipo_dato) ? "" : "hidden"}" id="attr_opciones_wrap">
+      <label class="flabel">Opciones (una por línea)</label>
+      <textarea id="attr_opciones" rows="4" placeholder="Ej.\nAlgodón\nPoliéster\nLino">${esc((a?.opciones || []).join("\n"))}</textarea>
+      <p class="muted" style="font-size:11px;margin-top:4px;">Dejalo vacío para que sea un campo de texto libre (el admin escribe el valor a mano al crear el producto).</p>
+    </div>
+    <div class="field">
+      <label class="flex items-center gap-2" style="font-size:13px;"><input type="checkbox" id="attr_variante" ${a?.es_variante ? "checked" : ""}> Es una variante seleccionable (como Talla o Color) — el cliente elige un valor en la ficha del producto para reservar</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-rose" onclick="saveAttribute(${a ? `'${a.id}'` : "null"})">${a ? "Guardar cambios" : "Crear atributo"}</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+    </div>`);
+}
+function saveAttribute(id) {
+  const etiqueta = document.getElementById("attr_etiqueta").value.trim();
+  if (!etiqueta) { toast("Escribe una etiqueta"); return; }
+  const tipo_dato = document.getElementById("attr_tipo_dato").value;
+  const unidad = document.getElementById("attr_unidad").value.trim();
+  const opciones = document.getElementById("attr_opciones").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  const es_variante = document.getElementById("attr_variante").checked;
+  if (id) {
+    crudUpdate("attributes", id, { etiqueta, tipo_dato, unidad, opciones, es_variante });
+    toast("Atributo actualizado");
+  } else {
+    const codigoInput = document.getElementById("attr_codigo").value.trim();
+    const codigo = slugify(codigoInput || etiqueta).replace(/-/g, "_");
+    if (!codigo) { toast("Escribe un código válido"); return; }
+    if (DB.attributes.some((a) => a.codigo === codigo)) { toast("Ya existe un atributo con ese código"); return; }
+    crudInsert("attributes", { codigo, etiqueta, tipo_dato, unidad, opciones, es_variante });
+    toast("Atributo creado");
+  }
+  closeModal(); renderRoute();
+}
+function deleteAttribute(id) {
+  if (!confirmar("¿Eliminar este atributo? Las categorías que lo tengan asignado dejarán de mostrarlo.")) return;
+  crudDelete("attributes", id); toast("Atributo eliminado"); renderRoute();
 }
 
 /* ================================================================
