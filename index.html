@@ -333,6 +333,7 @@ tbody tr:first-child td { border-top: none; }
    MISC
    ============================================================ */
 .file-drop { display: inline-block; background: var(--surface2); border: 1px dashed var(--border); border-radius: 10px; padding: 10px 16px; font-size: 14px; cursor: pointer; }
+.pm-subtitle { margin: 16px 0 8px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .photo-thumb { position: relative; width: 92px; }
 .photo-thumb img, .photo-thumb video { width: 92px; height: 92px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); }
 .photo-thumb .remove-btn { position: absolute; top: -8px; right: -8px; background: var(--danger); color: #fff; border: none; border-radius: 999px; width: 20px; height: 20px; font-size: 11px; }
@@ -344,6 +345,7 @@ tbody tr:first-child td { border-top: none; }
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 </head>
 <body>
@@ -1175,7 +1177,7 @@ function productCard(p, i) {
   return `
   <a href="#/producto/${p.slug}" class="product-card animate-fade-in-up" style="animation-delay:${(i || 0) * 60}ms">
     <div class="thumb">
-      <img src="${esc(img)}" alt="${esc(p.nombre)}">
+      <img src="${esc(img)}" alt="${esc(p.nombre)}" loading="lazy">
       ${p.etiqueta ? `<span class="tag-etiqueta" style="${TAG_COLORS[p.etiqueta] || "background:var(--ink);color:#fff;"}">${esc(p.etiqueta)}</span>` : ""}
       ${agotado ? `<span class="agotado-overlay">Agotado</span>` : ""}
     </div>
@@ -1355,7 +1357,7 @@ function productFormView(product, st) {
         <div class="gallery-thumbs">
           ${media.map((m, i) => `
             <button type="button" class="${i === st.activeMedia ? "active" : ""}" onclick="pdSetMedia(${i})">
-              ${m.tipo === "video" ? `<video src="${esc(m.url)}"></video><span class="play-badge">▶</span>` : `<img src="${esc(m.url)}" alt="">`}
+              ${m.tipo === "video" ? `<video src="${esc(m.url)}"></video><span class="play-badge">▶</span>` : `<img src="${esc(m.url)}" alt="" loading="lazy">`}
             </button>`).join("")}
         </div>
       </div>
@@ -1579,6 +1581,8 @@ const ADMIN_NAV = [
   { href: "#/admin/productos", label: "Productos" },
   { href: "#/admin/categorias", label: "Categorías" },
   { href: "#/admin/atributos", label: "Atributos" },
+  { href: "#/admin/bodegas", label: "Bodegas" },
+  { href: "#/admin/inventario", label: "Inventario" },
   { href: "#/admin/compras", label: "Compras" },
   { href: "#/admin/ventas", label: "Ventas" },
   { href: "#/admin/reservas", label: "Centro de reservas" },
@@ -1703,8 +1707,26 @@ function marcarNotifLeida(id) { crudUpdate("notifications", id, { leida: true })
 /* ================================================================
    PRODUCTOS — listado + modal con fotos, tallas, colores, medidas
    ================================================================ */
+/* Búsqueda instantánea + paginación client-side: a la escala actual (todo el
+   catálogo ya vive en memoria vía onSnapshot) esto ya es "instantáneo"; si el
+   catálogo crece a decenas de miles de productos, este es el punto donde se
+   conecta un índice externo (Algolia/Typesense) sin tocar el resto del admin. */
+let productosListState = { search: "", page: 0, pageSize: 50 };
+function pmListSetSearch(v) { productosListState.search = v; productosListState.page = 0; renderRoute(); }
+function pmListSetPage(delta) { productosListState.page = Math.max(0, productosListState.page + delta); renderRoute(); }
 route("/admin/productos", () => {
-  const rows = DB.products.map((p) => `
+  const st = productosListState;
+  const q = st.search.trim().toLowerCase();
+  const filtered = q ? DB.products.filter((p) =>
+    (p.nombre || "").toLowerCase().includes(q) ||
+    (p.sku || "").toLowerCase().includes(q) ||
+    (p.codigo_barras || "").toLowerCase().includes(q) ||
+    (p.categoria || "").toLowerCase().includes(q)
+  ) : DB.products;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / st.pageSize));
+  st.page = Math.min(st.page, totalPages - 1);
+  const pageItems = filtered.slice(st.page * st.pageSize, (st.page + 1) * st.pageSize);
+  const rows = pageItems.map((p) => `
     <tr>
       <td style="font-family:monospace;font-size:12px;">${esc(p.sku)}</td>
       <td style="font-weight:700;">${esc(p.nombre)}</td>
@@ -1718,37 +1740,86 @@ route("/admin/productos", () => {
       </td>
     </tr>`).join("");
   return adminLayout("#/admin/productos", "Catálogo", "Productos", `
-    <div class="flex justify-between items-center mb-5">
+    <div class="flex justify-between items-center flex-wrap gap-3 mb-5">
       <button class="btn btn-rose" onclick="openProductModal(null)">+ Nuevo producto</button>
+      <input value="${esc(st.search)}" oninput="pmListSetSearch(this.value)" placeholder="Buscar por nombre, SKU, código de barras o categoría..." style="max-width:320px;">
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>SKU</th><th>Producto</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Estado</th><th></th></tr></thead>
-      <tbody>${rows || `<tr class="empty-row"><td colspan="7">Sin productos todavía.</td></tr>`}</tbody>
+      <tbody>${rows || `<tr class="empty-row"><td colspan="7">${q ? "Ningún producto coincide con la búsqueda." : "Sin productos todavía."}</td></tr>`}</tbody>
     </table></div>
+    ${filtered.length > st.pageSize ? `
+    <div class="flex items-center justify-between mt-4">
+      <p class="muted" style="font-size:12px;">Página ${st.page + 1} de ${totalPages} · ${filtered.length} productos</p>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost btn-sm" ${st.page === 0 ? "disabled" : ""} onclick="pmListSetPage(-1)">← Anterior</button>
+        <button class="btn btn-ghost btn-sm" ${st.page >= totalPages - 1 ? "disabled" : ""} onclick="pmListSetPage(1)">Siguiente →</button>
+      </div>
+    </div>` : ""}
   `);
 });
 
 let productModalState = null;
+const PM_TABS = [
+  ["info", "Información"], ["media", "Multimedia"], ["variantes", "Variantes"],
+  ["inventario", "Inventario"], ["precios", "Precios"], ["atributos", "Atributos"],
+  ["documentos", "Documentos"], ["seo", "SEO"], ["historial", "Historial"],
+];
 function openProductModal(id) {
   const p = id ? findById("products", id) : null;
+  const ubic = p?.stock_por_bodega?.[DEFAULT_WAREHOUSE_ID] || {};
   productModalState = {
     editingId: id || null,
     draftId: id || ("draft_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
+    activeTab: "info",
     media: p ? [...(p.media || [])] : [],
     atributos: legacyAtributosFallback(p),
     variante_atributos: p ? [...(p.variante_atributos || [])] : [],
     variantes: p ? (p.variantes || []).map((v) => ({ ...v, combinacion: { ...v.combinacion } })) : [],
-    uploading: false,
+    documentos: p ? [...(p.documentos || [])] : [],
+    preciosVolumen: p ? (p.precios_por_volumen || []).map((x) => ({ ...x })) : [],
+    etiquetas: p ? [...(p.etiquetas || [])] : [],
+    keywords: p ? [...(p.keywords || [])] : [],
+    uploading: false, uploadingDoc: false,
+    // Campos simples — viven en el estado desde que se tocan (no solo en el DOM),
+    // para no perderse al cambiar de pestaña.
+    nombre: p?.nombre || "", nombre_corto: p?.nombre_corto || "", nombre_comercial: p?.nombre_comercial || "",
+    category_id: p?.category_id ?? DB.categories[0]?.id, etiqueta: p?.etiqueta || "",
+    costo_compra: p?.costo_compra ?? "", precio_venta: p?.precio_venta ?? "", stock: p?.stock ?? 0,
+    descripcion: p?.descripcion || "", codigo_barras: p?.codigo_barras || "", codigo_qr: p?.codigo_qr || "",
+    marca: p?.marca || "", modelo: p?.modelo || "", linea: p?.linea || "", coleccion: p?.coleccion || "",
+    fabricante: p?.fabricante || "", proveedor_id: p?.proveedor_id || "", pais_origen: p?.pais_origen || "",
+    familia: p?.familia || "", tipo_producto: p?.tipo_producto || "",
+    stock_minimo: p?.stock_minimo ?? "", stock_maximo: p?.stock_maximo ?? "", punto_reorden: p?.punto_reorden ?? "",
+    stock_transito: p?.stock_transito ?? 0,
+    pasillo: ubic.pasillo || "", estante: ubic.estante || "", nivel: ubic.nivel || "", caja: ubic.caja || "",
+    precio_oferta: p?.precio_oferta ?? "", precio_distribuidor: p?.precio_distribuidor ?? "",
+    precio_mayorista: p?.precio_mayorista ?? "", precio_vip: p?.precio_vip ?? "",
+    impuesto_tipo: p?.impuesto_tipo || "gravado", impuesto_porcentaje: p?.impuesto_porcentaje ?? "",
+    peso: p?.peso ?? "", alto: p?.alto ?? "", ancho: p?.ancho ?? "", largo: p?.largo ?? "",
+    requiere_embalaje: p?.requiere_embalaje || false, fragil: p?.fragil || false, peligroso: p?.peligroso || false,
+    meta_titulo: p?.meta_titulo || "", meta_descripcion: p?.meta_descripcion || "",
   };
   renderProductModal();
+  pmMaybeRestoreDraft();
 }
+function pmField(key, value) { productModalState[key] = value; pmScheduleAutosave(); }
+function pmSetTab(key) { syncProductFieldsFromDOM(); productModalState.activeTab = key; renderProductModal(); }
+function pmAddSimpleTag(field, inputId) {
+  const input = document.getElementById(inputId);
+  const v = input.value.trim();
+  if (!v) return;
+  productModalState[field].push(v);
+  renderProductModal();
+}
+function pmRemoveSimpleTag(field, i) { productModalState[field].splice(i, 1); renderProductModal(); }
+/* Los campos simples ya viven en el estado (oninput escribe directo). Esto
+   solo sincroniza los campos de Atributos que siguen leyéndose del DOM
+   (texto/número/booleano/fecha/selección — las multiselecciones ya son
+   reactivas) antes de cualquier cambio de pestaña o guardado. */
 function syncProductFieldsFromDOM() {
-  const st = productModalState, g = (id) => document.getElementById(id);
-  if (!g("pm_nombre")) return;
-  st.nombre = g("pm_nombre").value; st.category_id = g("pm_categoria").value;
-  st.etiqueta = g("pm_etiqueta").value; st.costo_compra = g("pm_costo").value; st.precio_venta = g("pm_precio").value;
-  st.stock = g("pm_stock").value; st.descripcion = g("pm_descripcion").value;
-  syncAtributosFromDOM(findById("categories", g("pm_categoria").value));
+  if (!productModalState) return;
+  syncAtributosFromDOM(findById("categories", productModalState.category_id));
 }
 const VISTAS_MEDIA = ["frontal", "lateral", "trasera", "tela", "puesta"];
 
@@ -1993,12 +2064,134 @@ function pmUpdatePrecioSugerido() {
 function renderProductModal() {
   const st = productModalState;
   const p = st.editingId ? findById("products", st.editingId) : null;
-  const val = (field, def) => (st[field] !== undefined ? st[field] : (p ? p[field] : def)) ?? def;
-  const categoryId = val("category_id", p?.category_id ?? DB.categories[0]?.id);
-  const categoriaObj = findById("categories", categoryId);
-  const atributosConfig = categoryAtributosVisibles(categoriaObj);
+  const categoriaObj = findById("categories", st.category_id);
   openModal(`
     <h3>${st.editingId ? "Editar producto" : "Nuevo producto"}</h3>
+    <div class="flex flex-wrap gap-1" style="border-bottom:1px solid var(--border);margin-bottom:16px;">
+      ${PM_TABS.map(([key, label]) => `<button type="button" onclick="pmSetTab('${key}')" style="padding:8px 10px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;color:${st.activeTab === key ? "var(--rose)" : "var(--muted)"};border-bottom:2px solid ${st.activeTab === key ? "var(--rose)" : "transparent"};">${label}</button>`).join("")}
+    </div>
+    <div style="max-height:52vh;overflow-y:auto;padding-right:4px;">
+      ${st.activeTab === "info" ? pmTabInfo(st, p) : ""}
+      ${st.activeTab === "media" ? pmTabMedia(st) : ""}
+      ${st.activeTab === "variantes" ? renderVariantesSection(st, categoriaObj) : ""}
+      ${st.activeTab === "inventario" ? pmTabInventario(st, p) : ""}
+      ${st.activeTab === "precios" ? pmTabPrecios(st) : ""}
+      ${st.activeTab === "atributos" ? pmTabAtributos(st, categoriaObj) : ""}
+      ${st.activeTab === "documentos" ? pmTabDocumentos(st) : ""}
+      ${st.activeTab === "seo" ? pmTabSeo(st) : ""}
+      ${st.activeTab === "historial" ? pmTabHistorial(p) : ""}
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-rose" onclick="saveProduct()">${st.editingId ? "Guardar cambios" : "Crear producto"}</button>
+      <button class="btn btn-ghost" onclick="pmCancelModal()">Cancelar</button>
+    </div>
+  `);
+  pmUpdatePrecioSugerido();
+  pmScheduleAutosave();
+}
+/* Autoguardado de borrador — evita perder cambios si se cierra la pestaña o
+   se cae la conexión a medio llenar un formulario largo de varias secciones. */
+function pmDraftKey() { return "nahui_pm_draft_" + (productModalState?.editingId || "new"); }
+let pmAutosaveTimer = null;
+function pmScheduleAutosave() {
+  clearTimeout(pmAutosaveTimer);
+  pmAutosaveTimer = setTimeout(() => {
+    try { localStorage.setItem(pmDraftKey(), JSON.stringify({ savedAt: Date.now(), state: productModalState })); } catch (e) { /* localStorage lleno o no disponible: no es crítico */ }
+  }, 600);
+}
+function pmClearDraft() { try { localStorage.removeItem(pmDraftKey()); } catch (e) {} }
+function pmCancelModal() { pmClearDraft(); closeModal(); }
+function pmMaybeRestoreDraft() {
+  let raw;
+  try { raw = localStorage.getItem(pmDraftKey()); } catch (e) { return; }
+  if (!raw) return;
+  try {
+    const { savedAt, state } = JSON.parse(raw);
+    if (!state || Date.now() - savedAt > 24 * 60 * 60 * 1000) { pmClearDraft(); return; }
+    if (confirmar("Hay un borrador sin guardar de este producto. ¿Querés recuperarlo?")) {
+      productModalState = { ...productModalState, ...state, draftId: productModalState.draftId, editingId: productModalState.editingId };
+      renderProductModal();
+    } else {
+      pmClearDraft();
+    }
+  } catch (e) { pmClearDraft(); }
+}
+function pmValidateNombreBlur() {
+  const st = productModalState;
+  const warning = document.getElementById("pm_nombre_warning");
+  if (!warning) return;
+  const msg = st.nombre.trim() ? checkDuplicateProduct({ nombre: st.nombre, excludeId: st.editingId }) : "";
+  warning.textContent = msg && msg.includes("llamado") ? msg : "";
+}
+function pmTabInfo(st, p) {
+  return `
+    <div class="field-row">
+      <div class="field"><label class="flabel">Nombre</label><input id="pm_nombre" required value="${esc(st.nombre)}" oninput="pmField('nombre', this.value)" onblur="pmValidateNombreBlur()"><p id="pm_nombre_warning" class="muted" style="font-size:11px;color:var(--danger);margin-top:2px;"></p></div>
+      <div class="field"><label class="flabel">Código SKU</label><input readonly disabled style="background:var(--surface2);color:var(--muted);" value="${esc(st.editingId ? (p?.sku || "") : "(se genera al guardar)")}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Nombre corto</label><input value="${esc(st.nombre_corto)}" oninput="pmField('nombre_corto', this.value)"></div>
+      <div class="field"><label class="flabel">Nombre comercial</label><input value="${esc(st.nombre_comercial)}" oninput="pmField('nombre_comercial', this.value)"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Categoría</label>
+        <select id="pm_categoria" onchange="syncProductFieldsFromDOM(); pmField('category_id', this.value); renderProductModal();">${DB.categories.map((c) => `<option value="${c.id}" ${st.category_id === c.id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select>
+      </div>
+      <div class="field"><label class="flabel">Etiqueta</label>
+        <select onchange="pmField('etiqueta', this.value)">
+          <option value="" ${!st.etiqueta ? "selected" : ""}>Ninguna</option>
+          ${["Nuevo ingreso", "Oferta", "Liquidación", "Tendencia", "Última unidad"].map((e) => `<option ${st.etiqueta === e ? "selected" : ""}>${e}</option>`).join("")}
+        </select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Costo de compra</label><input id="pm_costo" type="number" step="0.01" required value="${esc(st.costo_compra)}" oninput="pmField('costo_compra', this.value); pmUpdatePrecioSugerido()"></div>
+      <div class="field">
+        <label class="flabel">Precio de venta</label>
+        <input id="pm_precio" type="number" step="0.01" required value="${esc(st.precio_venta)}" oninput="pmField('precio_venta', this.value)">
+        <p class="muted" id="pm_precio_sugerido" style="font-size:11px;margin-top:4px;"></p>
+      </div>
+    </div>
+    <div class="field"><label class="flabel">Descripción</label><textarea rows="2" oninput="pmField('descripcion', this.value)">${esc(st.descripcion)}</textarea></div>
+    <h4 class="pm-subtitle">Marca y procedencia</h4>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Marca</label><input value="${esc(st.marca)}" oninput="pmField('marca', this.value)"></div>
+      <div class="field"><label class="flabel">Modelo</label><input value="${esc(st.modelo)}" oninput="pmField('modelo', this.value)"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Línea</label><input value="${esc(st.linea)}" oninput="pmField('linea', this.value)"></div>
+      <div class="field"><label class="flabel">Colección</label><input value="${esc(st.coleccion)}" oninput="pmField('coleccion', this.value)"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Fabricante</label><input value="${esc(st.fabricante)}" oninput="pmField('fabricante', this.value)"></div>
+      <div class="field"><label class="flabel">País de origen</label><input value="${esc(st.pais_origen)}" oninput="pmField('pais_origen', this.value)"></div>
+    </div>
+    <div class="field">
+      <label class="flabel">Proveedor</label>
+      <select onchange="pmField('proveedor_id', this.value)">
+        <option value="">Sin especificar</option>
+        ${DB.suppliers.map((s) => `<option value="${s.id}" ${st.proveedor_id === s.id ? "selected" : ""}>${esc(s.nombre)}</option>`).join("")}
+      </select>
+    </div>
+    <h4 class="pm-subtitle">Clasificación</h4>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Familia</label><input value="${esc(st.familia)}" oninput="pmField('familia', this.value)" placeholder="Ej. Temporada Verano"></div>
+      <div class="field"><label class="flabel">Tipo de producto</label><input value="${esc(st.tipo_producto)}" oninput="pmField('tipo_producto', this.value)" placeholder="Ej. Terminado, Insumo"></div>
+    </div>
+    <div class="field">
+      <label class="flabel">Etiquetas de búsqueda</label>
+      <div class="flex flex-wrap gap-2 mb-2">${st.etiquetas.map((t, i) => `<span class="tag">${esc(t)} <button type="button" onclick="pmRemoveSimpleTag('etiquetas',${i})">×</button></span>`).join("")}</div>
+      <div class="flex gap-2"><input id="pm_etiquetaInput" placeholder="Ej. verano, algodón"><button type="button" class="btn btn-ghost btn-sm" onclick="pmAddSimpleTag('etiquetas','pm_etiquetaInput')">+</button></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Código de barras</label><input id="pm_codigo_barras" value="${esc(st.codigo_barras)}" oninput="pmField('codigo_barras', this.value)"></div>
+      <div class="field"><label class="flabel">Código QR</label><input value="${esc(st.codigo_qr)}" oninput="pmField('codigo_qr', this.value)" placeholder="Se genera automáticamente del SKU">
+        ${st.editingId ? `<button type="button" class="btn-link" style="font-size:11px;margin-top:4px;" onclick="pmShowBarcode('${st.editingId}')">Ver código de barras / QR</button>` : ""}
+      </div>
+    </div>`;
+}
+function pmTabMedia(st) {
+  return `
     <div class="field">
       <label class="flabel">Fotografías y videos</label>
       <div class="flex flex-wrap gap-3" style="margin-bottom:10px;">
@@ -2018,46 +2211,167 @@ function renderProductModal() {
         : `<label class="file-drop">+ Agregar fotos o videos (ilimitadas)
         <input type="file" accept="image/*,video/*" multiple style="display:none;" onchange="pmAddMedia(event)">
       </label>`}
-      <p class="muted" style="font-size:11px;margin-top:4px;">Arrastrá una foto sobre otra para reordenar — la primera es la imagen principal del catálogo.</p>
+      <p class="muted" style="font-size:11px;margin-top:4px;">Arrastrá una foto sobre otra para reordenar — la primera es la imagen principal del catálogo y la miniatura.</p>
+    </div>
+    <p class="muted" style="font-size:12px;">Modelo 3D (opcional, ej. archivo .glb): guardá el enlace acá.</p>
+    <div class="field"><input placeholder="https://..." value="${esc(st.modelo_3d_url || "")}" oninput="pmField('modelo_3d_url', this.value)"></div>`;
+}
+function pmTabInventario(st, p) {
+  const disponible = st.editingId ? (p?.stock || 0) - (p?.stock_reservado || 0) : (parseInt(st.stock) || 0);
+  return `
+    <div class="grid grid-3 gap-3 mb-4">
+      <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Disponible</p><p style="font-weight:700;font-size:18px;">${disponible}</p></div>
+      <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Reservado</p><p style="font-weight:700;font-size:18px;">${p?.stock_reservado || 0}</p></div>
+      <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Vendido</p><p style="font-weight:700;font-size:18px;">${p?.stock_vendido || 0}</p></div>
+    </div>
+    <div class="field"><label class="flabel">Stock ${st.variantes.length ? "(no aplica — se maneja por variante)" : ""}</label><input id="pm_stock" type="number" ${st.variantes.length ? "disabled" : ""} value="${esc(st.stock)}" oninput="pmField('stock', this.value)"></div>
+    <div class="field"><label class="flabel">Stock en tránsito</label><input type="number" value="${esc(st.stock_transito)}" oninput="pmField('stock_transito', this.value)"></div>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Stock mínimo</label><input type="number" value="${esc(st.stock_minimo)}" oninput="pmField('stock_minimo', this.value)"></div>
+      <div class="field"><label class="flabel">Stock máximo</label><input type="number" value="${esc(st.stock_maximo)}" oninput="pmField('stock_maximo', this.value)"></div>
+      <div class="field"><label class="flabel">Punto de reorden</label><input type="number" value="${esc(st.punto_reorden)}" oninput="pmField('punto_reorden', this.value)"></div>
+    </div>
+    <h4 class="pm-subtitle">Ubicación (Bodega Principal)</h4>
+    <div class="field-row">
+      <div class="field"><label class="flabel">Pasillo</label><input value="${esc(st.pasillo)}" oninput="pmField('pasillo', this.value)"></div>
+      <div class="field"><label class="flabel">Estante</label><input value="${esc(st.estante)}" oninput="pmField('estante', this.value)"></div>
+      <div class="field"><label class="flabel">Nivel</label><input value="${esc(st.nivel)}" oninput="pmField('nivel', this.value)"></div>
+      <div class="field"><label class="flabel">Caja</label><input value="${esc(st.caja)}" oninput="pmField('caja', this.value)"></div>
+    </div>
+    ${st.editingId ? `<button type="button" class="btn btn-ghost btn-sm mt-2" onclick="pmShowKardex('${st.editingId}')">Ver Kardex de este producto</button>` : `<p class="muted" style="font-size:12px;">El Kardex queda disponible después de crear el producto.</p>`}`;
+}
+function pmTabPrecios(st) {
+  return `
+    <div class="field-row">
+      <div class="field"><label class="flabel">Precio oferta</label><input type="number" step="0.01" value="${esc(st.precio_oferta)}" oninput="pmField('precio_oferta', this.value)" placeholder="Vacío = sin oferta"></div>
+      <div class="field"><label class="flabel">Precio distribuidor</label><input type="number" step="0.01" value="${esc(st.precio_distribuidor)}" oninput="pmField('precio_distribuidor', this.value)"></div>
     </div>
     <div class="field-row">
-      <div class="field"><label class="flabel">Nombre</label><input id="pm_nombre" required value="${esc(val("nombre", ""))}"></div>
-      <div class="field"><label class="flabel">Código SKU</label><input id="pm_sku" readonly disabled style="background:var(--surface2);color:var(--muted);" value="${esc(st.editingId ? val("sku", "") : "(se genera al guardar)")}"></div>
+      <div class="field"><label class="flabel">Precio mayorista</label><input type="number" step="0.01" value="${esc(st.precio_mayorista)}" oninput="pmField('precio_mayorista', this.value)"></div>
+      <div class="field"><label class="flabel">Precio VIP</label><input type="number" step="0.01" value="${esc(st.precio_vip)}" oninput="pmField('precio_vip', this.value)"></div>
     </div>
+    <p class="muted" style="font-size:11px;">Estos precios quedan disponibles para uso interno (ventas manuales); el sitio público no tiene cuentas de cliente todavía, así que siempre muestra el precio normal u oferta.</p>
+    <div class="field">
+      <label class="flabel">Precios por volumen</label>
+      ${st.preciosVolumen.map((pv, i) => `
+        <div class="flex gap-2 items-center mb-2">
+          <input type="number" placeholder="Cantidad mínima" value="${esc(pv.cantidad_minima)}" onchange="pmSetVolumenField(${i},'cantidad_minima',this.value)" style="width:140px;">
+          <input type="number" step="0.01" placeholder="Precio" value="${esc(pv.precio)}" onchange="pmSetVolumenField(${i},'precio',this.value)" style="width:100px;">
+          <button type="button" class="btn-danger-text" onclick="pmRemoveVolumen(${i})">Eliminar</button>
+        </div>`).join("")}
+      <button type="button" class="btn btn-ghost btn-sm" onclick="pmAddVolumen()">+ Agregar nivel de precio por volumen</button>
+    </div>
+    <h4 class="pm-subtitle">Impuestos</h4>
     <div class="field-row">
-      <div class="field"><label class="flabel">Categoría</label>
-        <select id="pm_categoria" onchange="syncProductFieldsFromDOM(); renderProductModal();">${DB.categories.map((c) => `<option value="${c.id}" ${val("category_id", p?.category_id) === c.id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select>
-      </div>
-      <div class="field"><label class="flabel">Etiqueta</label>
-        <select id="pm_etiqueta">
-          <option value="" ${!val("etiqueta", "") ? "selected" : ""}>Ninguna</option>
-          ${["Nuevo ingreso", "Oferta", "Liquidación", "Tendencia", "Última unidad"].map((e) => `<option ${val("etiqueta", "") === e ? "selected" : ""}>${e}</option>`).join("")}
+      <div class="field"><label class="flabel">Tipo</label>
+        <select onchange="pmField('impuesto_tipo', this.value)">
+          <option value="gravado" ${st.impuesto_tipo === "gravado" ? "selected" : ""}>Gravado</option>
+          <option value="exento" ${st.impuesto_tipo === "exento" ? "selected" : ""}>Exento</option>
+          <option value="otro" ${st.impuesto_tipo === "otro" ? "selected" : ""}>Otro</option>
         </select>
       </div>
+      <div class="field"><label class="flabel">% impuesto (vacío = usa el IVA de Configuración)</label><input type="number" step="0.01" value="${esc(st.impuesto_porcentaje)}" oninput="pmField('impuesto_porcentaje', this.value)" ${st.impuesto_tipo !== "otro" ? "disabled" : ""}></div>
     </div>
+    <h4 class="pm-subtitle">Envío</h4>
     <div class="field-row">
-      <div class="field"><label class="flabel">Costo de compra</label><input id="pm_costo" type="number" step="0.01" required value="${esc(val("costo_compra", ""))}" oninput="pmUpdatePrecioSugerido()"></div>
-      <div class="field">
-        <label class="flabel">Precio de venta</label>
-        <input id="pm_precio" type="number" step="0.01" required value="${esc(val("precio_venta", ""))}">
-        <p class="muted" id="pm_precio_sugerido" style="font-size:11px;margin-top:4px;"></p>
-      </div>
+      <div class="field"><label class="flabel">Peso (kg)</label><input type="number" step="0.01" value="${esc(st.peso)}" oninput="pmField('peso', this.value)"></div>
+      <div class="field"><label class="flabel">Alto (cm)</label><input type="number" step="0.01" value="${esc(st.alto)}" oninput="pmField('alto', this.value)"></div>
+      <div class="field"><label class="flabel">Ancho (cm)</label><input type="number" step="0.01" value="${esc(st.ancho)}" oninput="pmField('ancho', this.value)"></div>
+      <div class="field"><label class="flabel">Largo (cm)</label><input type="number" step="0.01" value="${esc(st.largo)}" oninput="pmField('largo', this.value)"></div>
     </div>
-    <div class="field"><label class="flabel">Stock</label><input id="pm_stock" type="number" required value="${esc(val("stock", 0))}"></div>
-    <div class="field"><label class="flabel">Descripción</label><textarea id="pm_descripcion" rows="2">${esc(val("descripcion", ""))}</textarea></div>
-    ${atributosConfig.length ? `
-    <h4 style="margin:16px 0 8px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Atributos de ${esc(categoriaObj?.nombre || "la categoría")}</h4>
-    ${atributosConfig.map((cfg) => pmAtributoInputHtml(cfg, st.atributos[cfg.attr.codigo])).join("")}
-    ` : `<p class="muted" style="font-size:12px;">Esta categoría no tiene atributos configurados. Podés asignarle desde <a href="#/admin/categorias" style="text-decoration:underline;font-weight:700;">Categorías</a>.</p>`}
-    <h4 style="margin:16px 0 8px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Variantes</h4>
-    ${renderVariantesSection(st, categoriaObj)}
-    <div class="modal-actions">
-      <button class="btn btn-rose" onclick="saveProduct()">${st.editingId ? "Guardar cambios" : "Crear producto"}</button>
-      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
-    </div>
-  `);
-  pmUpdatePrecioSugerido();
+    ${(st.peso && st.alto && st.ancho && st.largo) ? `<p class="muted" style="font-size:12px;">Peso volumétrico estimado: <b>${((parseFloat(st.alto) * parseFloat(st.ancho) * parseFloat(st.largo)) / 5000).toFixed(2)} kg</b></p>` : ""}
+    <div class="flex flex-wrap gap-3" style="font-size:13px;">
+      <label class="flex items-center gap-1"><input type="checkbox" ${st.requiere_embalaje ? "checked" : ""} onchange="pmField('requiere_embalaje', this.checked)"> Requiere embalaje especial</label>
+      <label class="flex items-center gap-1"><input type="checkbox" ${st.fragil ? "checked" : ""} onchange="pmField('fragil', this.checked)"> Frágil</label>
+      <label class="flex items-center gap-1"><input type="checkbox" ${st.peligroso ? "checked" : ""} onchange="pmField('peligroso', this.checked)"> Peligroso</label>
+    </div>`;
 }
+function pmTabAtributos(st, categoriaObj) {
+  const atributosConfig = categoryAtributosVisibles(categoriaObj);
+  if (!atributosConfig.length) return `<p class="muted" style="font-size:12px;">Esta categoría no tiene atributos configurados. Podés asignarle desde <a href="#/admin/categorias" style="text-decoration:underline;font-weight:700;">Categorías</a>.</p>`;
+  return `
+    <h4 class="pm-subtitle" style="margin-top:0;">Atributos de ${esc(categoriaObj?.nombre || "la categoría")}</h4>
+    ${atributosConfig.map((cfg) => pmAtributoInputHtml(cfg, st.atributos[cfg.attr.codigo])).join("")}`;
+}
+function pmTabDocumentos(st) {
+  return `
+    <div class="field">
+      <label class="flabel">Documentos adjuntos (manual, garantía, certificados, ficha técnica, hoja de seguridad)</label>
+      <div class="table-wrap mb-3">
+        <table>
+          <thead><tr><th>Nombre</th><th>Tipo</th><th></th></tr></thead>
+          <tbody>${st.documentos.length ? st.documentos.map((d, i) => `
+            <tr><td><a href="${esc(d.url)}" target="_blank" style="text-decoration:underline;">${esc(d.nombre)}</a></td><td style="text-transform:capitalize;">${esc(d.tipo)}</td>
+            <td class="row-actions"><button class="btn-danger-text" onclick="pmRemoveDoc(${i})">Eliminar</button></td></tr>`).join("") : `<tr><td colspan="3" class="muted text-center" style="padding:20px;">Sin documentos todavía.</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div class="flex gap-2 items-center">
+        <select id="pm_doc_tipo" style="width:auto;">
+          <option value="manual">Manual</option><option value="garantia">Garantía</option><option value="certificado">Certificado</option>
+          <option value="ficha_tecnica">Ficha técnica</option><option value="hoja_seguridad">Hoja de seguridad</option><option value="otro">Otro</option>
+        </select>
+        ${st.uploadingDoc
+          ? `<span class="muted" style="font-size:13px;">Subiendo…</span>`
+          : `<label class="file-drop">+ Adjuntar archivo<input type="file" accept=".pdf,image/*" style="display:none;" onchange="pmAddDoc(event)"></label>`}
+      </div>
+    </div>`;
+}
+function pmTabSeo(st) {
+  return `
+    <div class="field"><label class="flabel">Meta título</label><input value="${esc(st.meta_titulo)}" oninput="pmField('meta_titulo', this.value)" maxlength="70"></div>
+    <div class="field"><label class="flabel">Meta descripción</label><textarea rows="2" maxlength="160" oninput="pmField('meta_descripcion', this.value)">${esc(st.meta_descripcion)}</textarea></div>
+    <div class="field">
+      <label class="flabel">Keywords</label>
+      <div class="flex flex-wrap gap-2 mb-2">${st.keywords.map((k, i) => `<span class="tag">${esc(k)} <button type="button" onclick="pmRemoveSimpleTag('keywords',${i})">×</button></span>`).join("")}</div>
+      <div class="flex gap-2"><input id="pm_keywordInput" placeholder="Ej. blusa elegante"><button type="button" class="btn btn-ghost btn-sm" onclick="pmAddSimpleTag('keywords','pm_keywordInput')">+</button></div>
+    </div>
+    <p class="muted" style="font-size:11px;">Este sitio no tiene servidor propio (es una sola página que corre en el navegador), así que estos campos ayudan al título de la pestaña y a buscadores que ejecutan JavaScript, pero no garantizan la vista previa en apps de mensajería.</p>`;
+}
+function pmTabHistorial(p) {
+  if (!p) return `<p class="muted" style="font-size:12px;">El historial queda disponible después de crear el producto.</p>`;
+  const ventas = DB.sales.filter((s) => s.product_id === p.id);
+  const totalVendido = ventas.reduce((s, v) => s + (v.cantidad || 0), 0);
+  const utilidadTotal = ventas.reduce((s, v) => s + (v.utilidad || 0), 0);
+  const ultimaVenta = [...ventas].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0];
+  const compras = DB.purchases.filter((c) => c.product_id === p.id);
+  const ultimaCompra = [...compras].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0];
+  const historial = DB.product_history.filter((h) => h.product_id === p.id).sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+  return `
+    <div class="grid grid-2 gap-3 mb-4">
+      <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Unidades vendidas</p><p style="font-weight:700;">${totalVendido}</p></div>
+      <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Utilidad generada</p><p style="font-weight:700;">${money(utilidadTotal)}</p></div>
+      <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Última venta</p><p style="font-weight:700;">${ultimaVenta ? esc(ultimaVenta.fecha) : "—"}</p></div>
+      <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Última compra</p><p style="font-weight:700;">${ultimaCompra ? esc(ultimaCompra.fecha) : "—"}</p></div>
+      <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Veces visto</p><p style="font-weight:700;">${p.veces_visto || 0}</p></div>
+      <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Veces compartido</p><p style="font-weight:700;">${p.veces_compartido || 0}</p></div>
+    </div>
+    <p style="font-size:12px;"><b>Creado por:</b> ${esc(p.creado_por || "—")} ${p.creado_en ? `— ${tiempoRelativo(p.creado_en)}` : ""}</p>
+    <p style="font-size:12px;margin-bottom:10px;"><b>Última edición:</b> ${esc(p.actualizado_por || "—")} ${p.actualizado_en ? `— ${tiempoRelativo(p.actualizado_en)}` : ""}</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th></tr></thead>
+      <tbody>${historial.length ? historial.slice(0, 20).map((h) => `<tr><td>${tiempoRelativo(h.fecha)}</td><td style="text-transform:capitalize;">${esc(h.accion)}</td><td>${esc(h.usuario)}</td></tr>`).join("") : `<tr><td colspan="3" class="muted text-center" style="padding:16px;">Sin historial todavía.</td></tr>`}</tbody>
+    </table></div>`;
+}
+function pmAddVolumen() { productModalState.preciosVolumen.push({ cantidad_minima: "", precio: "" }); renderProductModal(); }
+function pmSetVolumenField(i, field, value) { productModalState.preciosVolumen[i][field] = value; }
+function pmRemoveVolumen(i) { productModalState.preciosVolumen.splice(i, 1); renderProductModal(); }
+async function pmAddDoc(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const tipo = document.getElementById("pm_doc_tipo").value;
+  productModalState.uploadingDoc = true;
+  renderProductModal();
+  try {
+    const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const url = await uploadRawToStorage(file, `products/${productModalState.draftId}/docs/${stamp}_${file.name}`);
+    productModalState.documentos.push({ nombre: file.name, tipo, url, tamano: file.size, subido_en: nowISO() });
+  } catch (err) {
+    toast("Error al subir el documento: " + err.message);
+  }
+  productModalState.uploadingDoc = false;
+  renderProductModal();
+}
+function pmRemoveDoc(i) { productModalState.documentos.splice(i, 1); renderProductModal(); }
 async function pmAddMedia(e) {
   const files = Array.from(e.target.files || []);
   if (!files.length) return;
@@ -2089,37 +2403,51 @@ function pmDrop(i) {
 }
 function pmSetVista(i, v) { syncProductFieldsFromDOM(); productModalState.media[i].vista = v || null; renderProductModal(); }
 async function saveProduct() {
-  const st = productModalState, g = (id) => document.getElementById(id).value;
-  const nombreEl = document.getElementById("pm_nombre");
-  const nombre = nombreEl.value.trim();
-  nombreEl.style.borderColor = "";
+  syncProductFieldsFromDOM();
+  const st = productModalState;
+  const nombre = (st.nombre || "").trim();
   if (!nombre) {
     toast("El nombre es obligatorio");
-    nombreEl.style.borderColor = "var(--danger)";
-    nombreEl.focus();
+    pmSetTab("info");
     return;
   }
-  const category = findById("categories", g("pm_categoria"));
-  syncAtributosFromDOM(category);
+  const category = findById("categories", st.category_id);
   const atributosConfig = categoryAtributosVisibles(category);
   for (const cfg of atributosConfig) {
     if (!cfg.obligatorio) continue;
     const v = st.atributos[cfg.attr.codigo];
     const vacio = cfg.attr.tipo_dato === "multiseleccion" ? !Array.isArray(v) || v.length === 0 : v === undefined || v === null || v === "";
-    if (vacio) { toast(`"${cfg.attr.etiqueta}" es obligatorio`); return; }
+    if (vacio) { toast(`"${cfg.attr.etiqueta}" es obligatorio`); pmSetTab("atributos"); return; }
   }
-  const codigoBarras = document.getElementById("pm_codigo_barras")?.value.trim() || "";
+  const codigoBarras = (st.codigo_barras || "").trim();
   const variantSkus = st.variantes.map((v) => v.sku).filter(Boolean);
   const dupVariantSkus = variantSkus.filter((s, i) => variantSkus.indexOf(s) !== i);
   if (dupVariantSkus.length) { toast(`El SKU de variante "${dupVariantSkus[0]}" está repetido entre las variantes de este mismo producto`); return; }
   const dup = checkDuplicateProduct({ nombre, codigoBarras, excludeId: st.editingId, variantSkus, variantBarcodes: st.variantes.map((v) => v.codigo_barras).filter(Boolean) });
   if (dup) { toast(dup); return; }
-  const nuevoStock = parseInt(g("pm_stock")) || 0;
+  const num = (v) => (v === "" || v === null || v === undefined ? null : parseFloat(v));
+  const nuevoStock = parseInt(st.stock) || 0;
   const stockAnterior = st.editingId ? (findById("products", st.editingId)?.stock || 0) : 0;
+  const pesoVol = (st.peso && st.alto && st.ancho && st.largo) ? +((parseFloat(st.alto) * parseFloat(st.ancho) * parseFloat(st.largo)) / 5000).toFixed(2) : null;
   const data = {
-    nombre, category_id: g("pm_categoria"), categoria: category?.nombre || "",
-    etiqueta: g("pm_etiqueta"), costo_compra: parseFloat(g("pm_costo")) || 0, precio_venta: parseFloat(g("pm_precio")) || 0,
-    stock: nuevoStock, descripcion: g("pm_descripcion"), codigo_barras: codigoBarras || null,
+    nombre, nombre_corto: st.nombre_corto || null, nombre_comercial: st.nombre_comercial || null,
+    category_id: st.category_id, categoria: category?.nombre || "",
+    etiqueta: st.etiqueta, costo_compra: parseFloat(st.costo_compra) || 0, precio_venta: parseFloat(st.precio_venta) || 0,
+    stock: nuevoStock, descripcion: st.descripcion, codigo_barras: codigoBarras || null, codigo_qr: st.codigo_qr || null,
+    marca: st.marca || null, modelo: st.modelo || null, linea: st.linea || null, coleccion: st.coleccion || null,
+    fabricante: st.fabricante || null, proveedor_id: st.proveedor_id || null, pais_origen: st.pais_origen || null,
+    familia: st.familia || null, tipo_producto: st.tipo_producto || null, etiquetas: [...st.etiquetas],
+    stock_minimo: num(st.stock_minimo), stock_maximo: num(st.stock_maximo), punto_reorden: num(st.punto_reorden),
+    stock_transito: parseInt(st.stock_transito) || 0,
+    stock_por_bodega: { [DEFAULT_WAREHOUSE_ID]: { cantidad: nuevoStock, pasillo: st.pasillo || null, estante: st.estante || null, nivel: st.nivel || null, caja: st.caja || null } },
+    precio_oferta: num(st.precio_oferta), precio_distribuidor: num(st.precio_distribuidor),
+    precio_mayorista: num(st.precio_mayorista), precio_vip: num(st.precio_vip),
+    precios_por_volumen: st.preciosVolumen.filter((pv) => pv.cantidad_minima && pv.precio).map((pv) => ({ cantidad_minima: parseInt(pv.cantidad_minima), precio: parseFloat(pv.precio) })),
+    impuesto_tipo: st.impuesto_tipo, impuesto_porcentaje: st.impuesto_tipo === "otro" ? num(st.impuesto_porcentaje) : null,
+    peso: num(st.peso), alto: num(st.alto), ancho: num(st.ancho), largo: num(st.largo), peso_volumetrico: pesoVol,
+    requiere_embalaje: !!st.requiere_embalaje, fragil: !!st.fragil, peligroso: !!st.peligroso,
+    meta_titulo: st.meta_titulo || null, meta_descripcion: st.meta_descripcion || null, keywords: [...st.keywords],
+    documentos: st.documentos.map((d) => ({ ...d })), modelo_3d_url: st.modelo_3d_url || null,
     atributos: { ...st.atributos }, media: st.media,
     variante_atributos: [...st.variante_atributos], variantes: st.variantes.map((v) => ({ ...v })),
     actualizado_por: currentUser?.email || "sistema", actualizado_en: nowISO(),
@@ -2151,6 +2479,7 @@ async function saveProduct() {
       logProductHistory(nuevo.id, "creado", data);
       toast("Producto creado");
     }
+    pmClearDraft();
     closeModal(); renderRoute();
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = btnTextoOriginal; }
@@ -2172,6 +2501,92 @@ function deleteProduct(id) {
   if (!confirmar("¿Eliminar este producto?")) return;
   crudDelete("products", id); toast("Producto eliminado"); renderRoute();
 }
+const MOVIMIENTO_LABELS = {
+  venta: "Venta", compra: "Compra", reserva: "Reserva", liberacion_reserva: "Liberación de reserva",
+  entrega: "Entrega", devolucion: "Devolución", ajuste_manual: "Ajuste manual",
+};
+function pmShowKardex(productId) {
+  const p = findById("products", productId);
+  const movimientos = DB.stock_movements.filter((m) => m.product_id === productId).sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+  openModal(`
+    <h3>Kardex — ${esc(p?.nombre || "")}</h3>
+    <div class="table-wrap" style="max-height:55vh;overflow-y:auto;">
+      <table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Stock resultante</th><th>Usuario</th><th>Motivo</th></tr></thead>
+        <tbody>${movimientos.length ? movimientos.map((m) => `
+          <tr>
+            <td>${tiempoRelativo(m.fecha)}</td>
+            <td>${esc(MOVIMIENTO_LABELS[m.tipo] || m.tipo)}${m.variant_id ? " (variante)" : ""}</td>
+            <td style="font-weight:700;color:${m.cantidad < 0 ? "var(--danger)" : "var(--success)"};">${m.cantidad > 0 ? "+" : ""}${m.cantidad}</td>
+            <td>${m.stock_resultante ?? "—"}</td>
+            <td>${esc(m.usuario)}</td>
+            <td>${esc(m.motivo || "—")}</td>
+          </tr>`).join("") : `<tr><td colspan="6" class="muted text-center" style="padding:20px;">Sin movimientos todavía.</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>
+  `);
+}
+function pmShowBarcode(productId) {
+  const p = findById("products", productId);
+  if (!p) return;
+  const codigo = p.codigo_barras || p.sku;
+  const link = `${window.location.origin}${window.location.pathname}#/producto/${p.slug}`;
+  openModal(`
+    <h3>Código de producto — ${esc(p.nombre)}</h3>
+    <p class="muted" style="font-size:12px;">Este sitio no genera el gráfico de barras/QR escaneable en el navegador (necesitaría una librería especializada para que el código realmente funcione al escanearlo). Acá tenés el valor listo para copiar y pegar en tu impresora de etiquetas o en un generador de códigos online.</p>
+    <div class="field"><label class="flabel">Código de barras / SKU</label>
+      <div class="flex gap-2"><input readonly value="${esc(codigo)}" style="font-family:monospace;font-size:15px;font-weight:700;"><button type="button" class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('${esc(codigo)}');toast('Copiado')">Copiar</button></div>
+    </div>
+    <div class="field"><label class="flabel">Enlace para código QR</label>
+      <div class="flex gap-2"><input readonly value="${esc(link)}" style="font-family:monospace;font-size:12px;"><button type="button" class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('${esc(link)}');toast('Copiado')">Copiar</button></div>
+    </div>
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>
+  `);
+}
+
+/* Vista global del Kardex — todos los movimientos de stock de todos los
+   productos, filtrable, para auditoría a nivel de negocio (no por producto). */
+let inventarioFiltro = { producto: "", tipo: "" };
+route("/admin/inventario", () => {
+  const f = inventarioFiltro;
+  let movimientos = [...DB.stock_movements].sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+  if (f.producto) movimientos = movimientos.filter((m) => m.product_id === f.producto);
+  if (f.tipo) movimientos = movimientos.filter((m) => m.tipo === f.tipo);
+  movimientos = movimientos.slice(0, 200);
+  const rows = movimientos.map((m) => {
+    const p = findById("products", m.product_id);
+    return `
+    <tr>
+      <td>${tiempoRelativo(m.fecha)}</td>
+      <td>${esc(p?.nombre || "(producto eliminado)")}</td>
+      <td>${esc(MOVIMIENTO_LABELS[m.tipo] || m.tipo)}${m.variant_id ? " (variante)" : ""}</td>
+      <td style="font-weight:700;color:${m.cantidad < 0 ? "var(--danger)" : "var(--success)"};">${m.cantidad > 0 ? "+" : ""}${m.cantidad}</td>
+      <td>${m.stock_resultante ?? "—"}</td>
+      <td>${esc(m.usuario)}</td>
+      <td>${esc(m.motivo || "—")}</td>
+    </tr>`;
+  }).join("");
+  return adminLayout("#/admin/inventario", "Inventario", "Kardex global", `
+    <div class="flex flex-wrap gap-3 mb-4">
+      <select onchange="inventarioFiltro.producto=this.value;renderRoute();" style="max-width:260px;">
+        <option value="">Todos los productos</option>
+        ${[...DB.products].sort((a, b) => a.nombre.localeCompare(b.nombre)).map((p) => `<option value="${p.id}" ${f.producto === p.id ? "selected" : ""}>${esc(p.nombre)}</option>`).join("")}
+      </select>
+      <select onchange="inventarioFiltro.tipo=this.value;renderRoute();" style="max-width:220px;">
+        <option value="">Todos los tipos de movimiento</option>
+        ${Object.entries(MOVIMIENTO_LABELS).map(([v, l]) => `<option value="${v}" ${f.tipo === v ? "selected" : ""}>${l}</option>`).join("")}
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Cantidad</th><th>Stock resultante</th><th>Usuario</th><th>Motivo</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="muted text-center" style="padding:40px;">Sin movimientos que coincidan con el filtro.</td></tr>`}</tbody>
+      </table>
+    </div>
+    <p class="muted mt-3" style="font-size:12px;">Mostrando los ${movimientos.length} movimientos más recientes que coinciden con el filtro.</p>
+  `);
+});
 
 /* ================================================================
    CATEGORÍAS
@@ -2290,6 +2705,64 @@ function saveCategoryAttributes() {
   const config = st.items.filter((it) => it.checked).map(({ checked, ...rest }) => rest);
   crudUpdate("categories", st.categoryId, { atributos_config: config });
   closeModal(); toast("Atributos guardados"); catAttrModalState = null; renderRoute();
+}
+
+/* ================================================================
+   BODEGAS — hoy el negocio opera con una sola bodega, pero el modelo de
+   datos (stock_por_bodega en cada producto, warehouse_id en el kardex) ya
+   está listo para varias. Esta pantalla permite crearlas/administrarlas
+   sin tocar código el día que hagan falta.
+   ================================================================ */
+let editingWarehouseId = null;
+route("/admin/bodegas", () => {
+  const rows = DB.warehouses.map((w) => `
+    <div class="flex justify-between items-center" style="padding:14px 16px;border-top:1px solid var(--border);">
+      ${editingWarehouseId === w.id ? `
+        <div class="flex items-center gap-2 flex-wrap">
+          <input id="wh_edit_nombre_${w.id}" value="${esc(w.nombre)}" style="width:160px;">
+          <input id="wh_edit_desc_${w.id}" value="${esc(w.ubicacion_descripcion || "")}" placeholder="Dirección / descripción" style="width:220px;">
+          <button class="btn-link" style="color:var(--rose);" onclick="saveWarehouse('${w.id}')">Guardar</button>
+          <button class="btn-link" onclick="editingWarehouseId=null;renderRoute();">Cancelar</button>
+        </div>` : `<div><button class="btn-link" style="font-weight:700;" onclick="editingWarehouseId='${w.id}';renderRoute();">${esc(w.nombre)}</button>${w.ubicacion_descripcion ? `<p class="muted" style="font-size:12px;margin-top:2px;">${esc(w.ubicacion_descripcion)}</p>` : ""}</div>`}
+      <div class="flex items-center gap-3">
+        <button class="badge ${w.activa ? "badge-ok" : "badge-low"}" onclick="toggleWarehouse('${w.id}')">${w.activa ? "Activa" : "Desactivada"}</button>
+        ${w.id !== DEFAULT_WAREHOUSE_ID ? `<button class="btn-danger-text" onclick="deleteWarehouse('${w.id}')">Eliminar</button>` : ""}
+      </div>
+    </div>`).join("");
+  return adminLayout("#/admin/bodegas", "Inventario", "Bodegas", `
+    <button class="btn btn-navy mb-4" onclick="openNewWarehouseModal()">+ Nueva bodega</button>
+    <div class="table-wrap" style="border-radius:var(--radius);">${rows || `<p class="muted text-center" style="padding:40px;">Sin bodegas todavía.</p>`}</div>
+    <p class="muted mt-3" style="font-size:12px;">La ubicación (pasillo/estante/nivel/caja) de cada producto se define por bodega desde la pestaña Inventario del producto.</p>
+  `);
+});
+function openNewWarehouseModal() {
+  openModal(`
+    <h3>Nueva bodega</h3>
+    <div class="field"><label class="flabel">Nombre</label><input id="newwh_nombre" placeholder="Ej. Bodega Sucursal Norte"></div>
+    <div class="field"><label class="flabel">Dirección / descripción</label><input id="newwh_desc" placeholder="Opcional"></div>
+    <div class="modal-actions">
+      <button class="btn btn-rose" onclick="saveNewWarehouse()">Guardar</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+    </div>`);
+}
+function saveNewWarehouse() {
+  const nombre = document.getElementById("newwh_nombre").value.trim();
+  if (!nombre) { toast("Escribe un nombre"); return; }
+  const desc = document.getElementById("newwh_desc").value.trim();
+  crudInsert("warehouses", { nombre, ubicacion_descripcion: desc, activa: true });
+  closeModal(); toast("Bodega creada"); renderRoute();
+}
+function saveWarehouse(id) {
+  const nombre = document.getElementById("wh_edit_nombre_" + id).value.trim();
+  if (!nombre) return;
+  const desc = document.getElementById("wh_edit_desc_" + id).value.trim();
+  crudUpdate("warehouses", id, { nombre, ubicacion_descripcion: desc });
+  editingWarehouseId = null; toast("Bodega actualizada"); renderRoute();
+}
+function toggleWarehouse(id) { const w = findById("warehouses", id); crudUpdate("warehouses", id, { activa: !w.activa }); renderRoute(); }
+function deleteWarehouse(id) {
+  if (!confirmar("¿Eliminar esta bodega?")) return;
+  crudDelete("warehouses", id); toast("Bodega eliminada"); renderRoute();
 }
 
 /* ================================================================
