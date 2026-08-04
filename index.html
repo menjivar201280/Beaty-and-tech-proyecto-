@@ -736,7 +736,7 @@ route("/", () => {
         <h1>Belleza y tecnología <em>al mejor precio</em></h1>
         <p class="hero-slogan">Un mundo, una experiencia</p>
         <p>Reserva en línea y recibe donde estés en El Salvador.</p>
-        <a href="#catalogo" class="hero-cta">Ver catálogo</a>
+        <a href="#/" onclick="event.preventDefault();document.getElementById('catalogo').scrollIntoView({behavior:'smooth'});" class="hero-cta">Ver catálogo</a>
       </div>
     </section>
 
