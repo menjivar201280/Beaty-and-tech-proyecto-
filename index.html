@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NAHUI | Belleza y tecnología al mejor precio</title>
+<meta name="description" content="NAHUI: belleza y tecnología al mejor precio. Reserva en línea y recibe donde estés en El Salvador.">
+<meta name="robots" content="index, follow">
 <style>
 /* Fuentes empaquetadas localmente para que el sitio funcione 100% offline */
 
@@ -199,7 +201,6 @@ tbody tr:first-child td { border-top: none; }
 .site-nav { display: none; align-items: center; gap: 20px; margin-left: 24px; overflow-x: auto; font-size: 14px; font-weight: 700; }
 .site-nav a:hover { color: var(--rose); }
 @media (min-width: 768px) { .site-nav { display: flex; } }
-.whatsapp-btn { margin-left: auto; font-size: 12px; font-weight: 800; background: var(--navy); color: #fff; padding: 9px 14px; border-radius: 10px; flex-shrink: 0; }
 
 /* ============================================================
    HERO
@@ -430,23 +431,6 @@ function fileToDataUrl(file) {
     r.onload = () => resolve(r.result);
     r.onerror = reject;
     r.readAsDataURL(file);
-  });
-}
-async function compressImage(file, maxW) {
-  const dataUrl = await fileToDataUrl(file);
-  if (!file.type.startsWith("image")) return dataUrl;
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const scale = Math.min(1, (maxW || 900) / img.width);
-      const canvas = document.createElement("canvas");
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL("image/jpeg", 0.82));
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
   });
 }
 /* Fotos/videos de producto van a Firebase Storage (no embebidas en el
@@ -1004,7 +988,6 @@ function siteHeader() {
         ${cats.map((c) => `<a href="#/categoria/${c.slug}">${esc(c.nombre)}</a>`).join("")}
       </nav>
       <a href="#/admin/dashboard" class="btn btn-ghost btn-sm" style="margin-left:auto;flex-shrink:0;">⚙ Administrar</a>
-      <a href="https://wa.me/50300000000" target="_blank" rel="noreferrer" class="whatsapp-btn" style="margin-left:10px;">WhatsApp</a>
     </div>
   </header>`;
 }
@@ -1245,7 +1228,8 @@ function ensurePdState(product) {
       variantSel: {},
       zonaId: DB.delivery_zones.find((z) => z.activa)?.id || "",
       fechaEntrega: todayStr(),
-      metodoPago: "transferencia", comprobante: null, comprobanteNombre: "",
+      metodoPago: "transferencia", comprobante: null, comprobanteNombre: "", comprobanteSubiendo: false,
+      draftId: "chk_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
       nombre: "", whatsapp: "", correo: "", direccion: "",
       submitting: false, errorMsg: "", result: null,
     };
@@ -1433,8 +1417,9 @@ function productFormView(product, st) {
           ${requiereComprobante ? `
           <div class="field">
             <label class="flabel">Comprobante de pago (opcional)</label>
-            <input type="file" accept="image/*,application/pdf" onchange="pdUploadComprobante(event)">
-            ${st.comprobante ? `<p style="font-size:12px;color:var(--success);margin-top:4px;">✔ ${esc(st.comprobanteNombre)} listo para enviar</p>` : ""}
+            <input type="file" accept="image/*,application/pdf" onchange="pdUploadComprobante(event)" ${st.comprobanteSubiendo ? "disabled" : ""}>
+            ${st.comprobanteSubiendo ? `<p style="font-size:12px;color:var(--muted);margin-top:4px;">Subiendo comprobante...</p>` : ""}
+            ${st.comprobante && !st.comprobanteSubiendo ? `<p style="font-size:12px;color:var(--success);margin-top:4px;">✔ ${esc(st.comprobanteNombre)} listo para enviar</p>` : ""}
           </div>` : ""}
 
           <div class="field-row">
@@ -1467,8 +1452,8 @@ function productFormView(product, st) {
 
           ${st.errorMsg ? `<p style="color:var(--danger);font-size:13px;margin-top:10px;">${esc(st.errorMsg)}</p>` : ""}
 
-          <button class="btn btn-rose btn-full" style="margin-top:16px;" ${st.submitting || agotado ? "disabled" : ""}>
-            ${faltaElegirVariante ? "Elegí las opciones" : agotado ? "Producto agotado" : st.submitting ? "Enviando..." : (entrega.esInmediato ? "Confirmar pedido" : "Reservar ahora")}
+          <button class="btn btn-rose btn-full" style="margin-top:16px;" ${st.submitting || st.comprobanteSubiendo || agotado ? "disabled" : ""}>
+            ${faltaElegirVariante ? "Elegí las opciones" : agotado ? "Producto agotado" : st.submitting ? "Enviando..." : st.comprobanteSubiendo ? "Subiendo comprobante..." : (entrega.esInmediato ? "Confirmar pedido" : "Reservar ahora")}
           </button>
           <p class="muted" style="font-size:11px;text-align:center;margin-top:8px;">${entrega.esInmediato ? "Tu pedido se procesa de inmediato al confirmar el pago." : "La reserva se mantiene activa por 24 horas mientras se confirma el anticipo."}</p>
         </form>
@@ -1480,12 +1465,26 @@ function productFormView(product, st) {
 function pdSetField(field, value) { pdState[field] = value; renderRoute(); }
 function pdSetMedia(i) { pdState.activeMedia = i; pdState.zoomed = false; renderRoute(); }
 function pdToggleZoom() { pdState.zoomed = !pdState.zoomed; renderRoute(); }
+/* El comprobante se sube a Firebase Storage (no se embebe como base64 en el
+   documento de Firestore): un documento de Firestore tiene un límite duro de
+   1 MiB, y una foto de recibo o un PDF fácilmente lo supera, lo que hacía
+   fallar la reserva completa del cliente sin explicación clara. */
 async function pdUploadComprobante(e) {
   const file = e.target.files?.[0];
   if (!file) return;
-  const dataUrl = await compressImage(file, 1000);
-  pdState.comprobante = dataUrl;
-  pdState.comprobanteNombre = file.name;
+  pdState.comprobanteSubiendo = true; renderRoute();
+  try {
+    const blob = await compressImageToBlob(file, 1400);
+    const esImagen = file.type.startsWith("image");
+    const ext = esImagen ? "jpg" : (file.name.split(".").pop() || "pdf").toLowerCase();
+    const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const url = await uploadRawToStorage(blob, `payment_proofs/${pdState.draftId}/${stamp}.${ext}`);
+    pdState.comprobante = url;
+    pdState.comprobanteNombre = file.name;
+  } catch (err) {
+    pdState.errorMsg = "No pudimos subir el comprobante. Verifica tu conexión e intenta de nuevo.";
+  }
+  pdState.comprobanteSubiendo = false;
   renderRoute();
 }
 async function pdSubmit(e, productId) {
@@ -1641,9 +1640,12 @@ function toggleAdminSidebar(open) {
 
 /* Modal genérico */
 function openModal(html) {
-  document.getElementById("modalRoot").innerHTML = `<div class="modal-bg show" onclick="if(event.target===this) closeModal()"><div class="modal">${html}</div></div>`;
+  document.getElementById("modalRoot").innerHTML = `<div class="modal-bg show" onclick="if(event.target===this) closeModal()"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`;
 }
 function closeModal() { document.getElementById("modalRoot").innerHTML = ""; }
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.getElementById("modalRoot")?.innerHTML.trim()) closeModal();
+});
 
 /* Confirmación simple reemplazando confirm() nativo para consistencia visual (usa confirm nativo, es suficiente) */
 function confirmar(msg) { return window.confirm(msg); }
@@ -2197,7 +2199,7 @@ function pmTabMedia(st) {
       <div class="flex flex-wrap gap-3" style="margin-bottom:10px;">
         ${st.media.map((m, i) => `
           <div class="photo-thumb" draggable="true" ondragstart="pmDragStart(${i})" ondragover="event.preventDefault()" ondrop="pmDrop(${i})" style="position:relative;">
-            ${m.tipo === "video" ? `<video src="${m.url}"></video>` : `<img src="${m.thumbUrl || m.url}" loading="lazy">`}
+            ${m.tipo === "video" ? `<video src="${m.url}"></video>` : `<img src="${m.thumbUrl || m.url}" alt="Foto ${i + 1} del producto" loading="lazy">`}
             ${i === 0 ? `<span class="badge" style="position:absolute;top:2px;left:2px;font-size:9px;padding:2px 6px;">Principal</span>` : ""}
             <button type="button" class="remove-btn" onclick="pmRemoveMedia(${i})">×</button>
             <select style="font-size:10px;margin-top:2px;padding:2px;" onchange="pmSetVista(${i}, this.value)">
@@ -2216,13 +2218,26 @@ function pmTabMedia(st) {
     <p class="muted" style="font-size:12px;">Modelo 3D (opcional, ej. archivo .glb): guardá el enlace acá.</p>
     <div class="field"><input placeholder="https://..." value="${esc(st.modelo_3d_url || "")}" oninput="pmField('modelo_3d_url', this.value)"></div>`;
 }
+/* Estado calculado a partir de mínimo/máximo/punto de reorden — nunca se
+   guarda, solo se muestra (evita que quede desactualizado si cambian los
+   umbrales o el stock). */
+function inventoryStatus(disponible, stockMinimo, puntoReorden, stockMaximo) {
+  const min = parseFloat(stockMinimo), reorden = parseFloat(puntoReorden), max = parseFloat(stockMaximo);
+  if (disponible <= 0) return { label: "Agotado", cls: "badge-out" };
+  if (!isNaN(min) && min > 0 && disponible <= min) return { label: "Crítico", cls: "badge-out" };
+  if (!isNaN(reorden) && reorden > 0 && disponible <= reorden) return { label: "Reordenar", cls: "badge-low" };
+  if (!isNaN(max) && max > 0 && disponible >= max) return { label: "Exceso", cls: "badge-low" };
+  return { label: "Normal", cls: "badge-ok" };
+}
 function pmTabInventario(st, p) {
   const disponible = st.editingId ? (p?.stock || 0) - (p?.stock_reservado || 0) : (parseInt(st.stock) || 0);
+  const estado = inventoryStatus(disponible, st.stock_minimo, st.punto_reorden, st.stock_maximo);
   return `
-    <div class="grid grid-3 gap-3 mb-4">
+    <div class="grid grid-2 md:grid-4 gap-3 mb-4">
       <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Disponible</p><p style="font-weight:700;font-size:18px;">${disponible}</p></div>
       <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Reservado</p><p style="font-weight:700;font-size:18px;">${p?.stock_reservado || 0}</p></div>
       <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Vendido</p><p style="font-weight:700;font-size:18px;">${p?.stock_vendido || 0}</p></div>
+      <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Estado del inventario</p><p style="margin-top:4px;"><span class="badge ${estado.cls}">${estado.label}</span></p></div>
     </div>
     <div class="field"><label class="flabel">Stock ${st.variantes.length ? "(no aplica — se maneja por variante)" : ""}</label><input id="pm_stock" type="number" ${st.variantes.length ? "disabled" : ""} value="${esc(st.stock)}" oninput="pmField('stock', this.value)"></div>
     <div class="field"><label class="flabel">Stock en tránsito</label><input type="number" value="${esc(st.stock_transito)}" oninput="pmField('stock_transito', this.value)"></div>
