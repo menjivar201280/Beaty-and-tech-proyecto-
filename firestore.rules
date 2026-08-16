@@ -4,12 +4,23 @@ service cloud.firestore {
     function isAdmin() {
       return request.auth != null;
     }
+    // Umbral de inventario válido: sin configurar (null) o entero >= 0.
+    // Bloquea negativos/decimales aunque alguien salte la validación del
+    // formulario y escriba directo a Firestore (solo un admin autenticado
+    // puede llegar a este punto de todas formas — ver "allow create, update").
+    function validUmbral(v) {
+      return v == null || (v is int && v >= 0);
+    }
 
     // Catálogo público: cualquiera puede leer, solo el admin autenticado escribe.
     match /categories/{id} { allow read: if true; allow write: if isAdmin(); }
     match /products/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if isAdmin()
+        && validUmbral(request.resource.data.stock_minimo)
+        && validUmbral(request.resource.data.stock_maximo)
+        && validUmbral(request.resource.data.punto_reorden);
+      allow delete: if isAdmin();
       // Al reservar, un visitante público necesita marcar el producto como
       // apartado — se limita a esos dos campos, nunca a precio/stock/nombre.
       allow update: if !isAdmin()
