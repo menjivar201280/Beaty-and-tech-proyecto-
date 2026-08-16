@@ -2616,6 +2616,7 @@ route("/admin/categorias", () => {
         </div>` : `<button class="btn-link" style="font-weight:700;" onclick="editingCategoryId='${c.id}';renderRoute();">${esc(c.nombre)} <span class="muted" style="font-size:11px;font-weight:400;">(${(TIPOS_PRODUCTO.find(([v]) => v === tipoDeCategoria(c)) || [])[1] || ""})</span></button>`}
       <div class="flex items-center gap-3">
         <button class="btn-link" onclick="openCategoryAttributesModal('${c.id}')">Atributos (${(c.atributos_config || []).length})</button>
+        <button class="btn-link" onclick="showCategoryQr('${c.id}')">QR</button>
         <button class="badge ${c.activa ? "badge-ok" : "badge-low"}" onclick="toggleCategoria('${c.id}')">${c.activa ? "Activa" : "Desactivada"}</button>
         <button class="btn-danger-text" onclick="deleteCategoria('${c.id}')">Eliminar</button>
       </div>
@@ -2659,6 +2660,25 @@ function toggleCategoria(id) { const c = findById("categories", id); crudUpdate(
 function deleteCategoria(id) {
   if (!confirmar("¿Eliminar esta categoría?")) return;
   crudDelete("categories", id); toast("Categoría eliminada"); renderRoute();
+}
+/* Mismo patrón que el QR de producto: la codificación la hace el servicio
+   externo goqr.me, apuntando al listado público de esta categoría. */
+function showCategoryQr(categoryId) {
+  const c = findById("categories", categoryId);
+  if (!c) return;
+  const link = `${window.location.origin}${window.location.pathname}#/categoria/${c.slug}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(link)}`;
+  openModal(`
+    <h3>Código QR — ${esc(c.nombre)}</h3>
+    <div class="text-center" style="margin-bottom:12px;">
+      <img src="${qrUrl}" alt="Código QR de la categoría ${esc(c.nombre)}" width="260" height="260" style="border-radius:8px;border:1px solid var(--border);background:#fff;">
+      <p class="muted" style="font-size:11px;margin-top:6px;">Apunta al catálogo público de esta categoría. Clic derecho → Guardar imagen para descargarlo o imprimirlo. Necesita conexión a internet para cargar.</p>
+    </div>
+    <div class="field"><label class="flabel">Enlace codificado en el QR</label>
+      <div class="flex gap-2"><input readonly value="${esc(link)}" style="font-family:monospace;font-size:12px;"><button type="button" class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('${esc(link)}');toast('Copiado')">Copiar</button></div>
+    </div>
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>
+  `);
 }
 
 /* Configuración de atributos por categoría: qué atributos globales aplican acá
