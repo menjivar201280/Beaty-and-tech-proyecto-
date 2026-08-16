@@ -21,10 +21,20 @@ service cloud.firestore {
         && validUmbral(request.resource.data.stock_maximo)
         && validUmbral(request.resource.data.punto_reorden);
       allow delete: if isAdmin();
-      // Al reservar, un visitante público necesita marcar el producto como
-      // apartado — se limita a esos dos campos, nunca a precio/stock/nombre.
+      // Al reservar, un visitante público necesita marcar el producto (o,
+      // si tiene variantes, el arreglo de variantes) como apartado — nunca
+      // precio/sku/costo. Para el caso sin variantes, además exige que
+      // stock_reservado sea un entero que solo puede subir (nunca bajar —
+      // liberar o entregar es acción exclusiva de admin) y en pasos
+      // razonables, para que una escritura manual maliciosa no pueda
+      // inflarlo a un número arbitrario de un solo golpe.
       allow update: if !isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock_reservado', 'estado']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock_reservado', 'estado'])
+        && request.resource.data.stock_reservado is int
+        && request.resource.data.stock_reservado >= resource.data.stock_reservado
+        && request.resource.data.stock_reservado <= resource.data.stock_reservado + 20;
+      allow update: if !isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['variantes']);
     }
     match /delivery_zones/{id} { allow read: if true; allow write: if isAdmin(); }
     match /attributes/{id} { allow read: if true; allow write: if isAdmin(); }
@@ -32,25 +42,44 @@ service cloud.firestore {
 
     // Un visitante público puede crear una reserva, comprobante, deseo o
     // movimiento de kardex (al reservar), pero solo el admin puede
-    // leerlos, editarlos o borrarlos.
+    // leerlos, editarlos o borrarlos. Cada "create" público valida la forma
+    // mínima esperada — ya no acepta cualquier documento con cualquier
+    // contenido, aunque tampoco reemplaza una revisión completa de esquema
+    // (ver informe: no se pudo probar contra un emulador real de Firestore).
     match /reservations/{id} {
-      allow create: if true;
+      allow create: if request.resource.data.estado in ['pendiente', 'comprobante_recibido']
+        && request.resource.data.product_id is string && request.resource.data.product_id.size() > 0
+        && request.resource.data.cantidad is int && request.resource.data.cantidad > 0 && request.resource.data.cantidad <= 20
+        && request.resource.data.total_a_pagar is number && request.resource.data.total_a_pagar >= 0;
       allow read, update, delete: if isAdmin();
     }
     match /stock_movements/{id} {
-      allow create: if true;
+      // El único movimiento que un visitante público puede generar es el
+      // de su propia reserva — venta/compra/ajuste/entrega/liberación son
+      // siempre del admin.
+      allow create: if isAdmin()
+        || (request.resource.data.tipo == 'reserva'
+          && request.resource.data.product_id is string && request.resource.data.product_id.size() > 0
+          && request.resource.data.cantidad is number);
       allow read, update, delete: if isAdmin();
     }
     match /payment_proofs/{id} {
-      allow create: if true;
+      allow create: if request.resource.data.reservation_id is string && request.resource.data.reservation_id.size() > 0
+        && request.resource.data.archivo_url is string && request.resource.data.archivo_url.size() > 0
+        && request.resource.data.estado == 'pendiente';
       allow read, update, delete: if isAdmin();
     }
-    match /wishlist/{id} {
-      allow create: if true;
-      allow read, update, delete: if isAdmin();
-    }
+    // La lista de deseos se registra siempre desde el panel admin (un
+    // miembro del equipo anota el pedido, por ejemplo tras una llamada) —
+    // no existe ningún flujo público que la escriba, así que no necesita
+    // "allow create: if true" en absoluto.
+    match /wishlist/{id} { allow read, write: if isAdmin(); }
     match /notifications/{id} {
-      allow create: if true;
+      // Los únicos tipos que el checkout público genera — cualquier otro
+      // tipo de notificación (respaldo, sistema, etc.) es interno/admin.
+      allow create: if request.resource.data.tipo in ['nueva_reserva', 'comprobante_subido']
+        && request.resource.data.titulo is string && request.resource.data.mensaje is string
+        && request.resource.data.leida == false;
       allow read, update, delete: if isAdmin();
     }
 

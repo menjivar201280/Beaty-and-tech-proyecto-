@@ -458,6 +458,18 @@ async function uploadRawToStorage(blobOrFile, path) {
   await ref.put(blobOrFile);
   return await ref.getDownloadURL();
 }
+/* Borra el archivo real de Storage detrás de una URL de descarga — best
+   effort: si falla (ya no existe, red caída, es una URL de antes de esta
+   corrección) no bloquea ni revierte la acción principal (quitar la foto,
+   eliminar el producto), solo evita que quede un archivo huérfano cuando
+   sí se puede. Las URL data: (fotos heredadas todavía sin migrar) no
+   tienen nada que borrar en Storage — se ignoran sin intentarlo. */
+function tryDeleteStorageFile(url) {
+  if (!url || url.startsWith("data:")) return;
+  try {
+    firebase.storage().refFromURL(url).delete().catch((e) => console.error("tryDeleteStorageFile", url, e));
+  } catch (e) { console.error("tryDeleteStorageFile", url, e); }
+}
 async function uploadMediaFile(file, folderId) {
   const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   if (file.type.startsWith("video")) {
@@ -892,6 +904,190 @@ async function logStockMovement({ productId, variantId, tipo, cantidad, stockRes
       motivo: motivo || "", usuario: currentUser?.email || "sistema", fecha: nowISO(),
     });
   } catch (e) { console.error("logStockMovement", e); }
+}
+/* ---------------- OPERACIONES DE STOCK ATÓMICAS ----------------
+   Antes, reservar/entregar/cancelar/vender leían el producto desde la copia
+   local en memoria (DB.products, que puede tener unos milisegundos o
+   segundos de retraso respecto al servidor) y escribían el nuevo valor
+   calculado a partir de esa lectura potencialmente vieja. Dos clientes
+   reservando la última unidad casi al mismo tiempo podían pasar ambos la
+   validación y sobrevender. db.runTransaction() vuelve a leer el documento
+   real en el servidor justo antes de escribir y reintenta automáticamente
+   si alguien más lo tocó mientras tanto — es la única forma real de que
+   esto sea seguro con varios usuarios a la vez. */
+function calcularDisponibleDeVariante(v) { return (v?.stock || 0) - (v?.stock_reservado || 0); }
+/* Reserva 1 unidad (producto o variante) y crea la reserva + el movimiento
+   de kardex en la MISMA transacción — o no se hace nada. Lanza "SIN_STOCK"
+   si ya no hay disponible al momento real de escribir (no al momento en que
+   el visitante cargó la página). */
+async function reservarStockTransaccion({ productId, variantId, reservationData }) {
+  const productRef = db.collection("products").doc(productId);
+  const reservationRef = db.collection("reservations").doc();
+  const stockMovRef = db.collection("stock_movements").doc();
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(productRef);
+    if (!snap.exists) throw new Error("PRODUCTO_NO_EXISTE");
+    const p = snap.data();
+    let stockResultante;
+    if (variantId) {
+      const variantes = p.variantes || [];
+      const idx = variantes.findIndex((v) => v.id === variantId);
+      if (idx === -1) throw new Error("PRODUCTO_NO_EXISTE");
+      const v = variantes[idx];
+      if (calcularDisponibleDeVariante(v) <= 0 || v.estado !== "activa") throw new Error("SIN_STOCK");
+      const nuevasVariantes = variantes.map((x, i) => i === idx ? { ...x, stock_reservado: (x.stock_reservado || 0) + 1 } : x);
+      tx.update(productRef, { variantes: nuevasVariantes });
+      stockResultante = v.stock;
+    } else {
+      const disponible = (p.stock || 0) - (p.stock_reservado || 0);
+      if (disponible <= 0) throw new Error("SIN_STOCK");
+      tx.update(productRef, { stock_reservado: (p.stock_reservado || 0) + 1, estado: disponible - 1 <= 0 ? "reservado" : p.estado });
+      stockResultante = p.stock;
+    }
+    tx.set(reservationRef, reservationData);
+    tx.set(stockMovRef, {
+      product_id: productId, variant_id: variantId || null, warehouse_id: DEFAULT_WAREHOUSE_ID,
+      tipo: "reserva", cantidad: 1, stock_resultante: stockResultante, referencia_id: reservationRef.id,
+      motivo: `Reserva ${reservationData.numero_orden} — ${reservationData.cliente_nombre}`,
+      usuario: "sistema", fecha: nowISO(),
+    });
+  });
+  return { id: reservationRef.id, ...reservationData };
+}
+/* Entrega (resta stock real) o cancela (libera stock_reservado) una
+   reserva de forma atómica, revisando DENTRO de la transacción que la
+   reserva siga en un estado accionable — así un doble clic o dos
+   administradores casi al mismo tiempo no pueden descontar/liberar el
+   inventario dos veces sobre la misma reserva. */
+async function resolverReservaTransaccion(reservationId, accion) {
+  const reservationRef = db.collection("reservations").doc(reservationId);
+  const stockMovRef = db.collection("stock_movements").doc();
+  let sinProducto = false;
+  await db.runTransaction(async (tx) => {
+    const rSnap = await tx.get(reservationRef);
+    if (!rSnap.exists) throw new Error("RESERVA_NO_EXISTE");
+    const r = rSnap.data();
+    if (RESERVA_ESTADOS_FINALES.includes(r.estado)) throw new Error("YA_RESUELTA");
+    const cantidad = r.cantidad || 1;
+    const productRef = r.product_id ? db.collection("products").doc(r.product_id) : null;
+    const pSnap = productRef ? await tx.get(productRef) : null;
+    if (!pSnap || !pSnap.exists) {
+      sinProducto = true;
+    } else {
+      const p = pSnap.data();
+      if (r.variant_id && p.variantes) {
+        const idx = p.variantes.findIndex((v) => v.id === r.variant_id);
+        if (idx !== -1) {
+          const v = p.variantes[idx];
+          const nuevasVariantes = [...p.variantes];
+          let stockResultante = v.stock;
+          if (accion === "entregar") {
+            stockResultante = Math.max(0, (v.stock || 0) - cantidad);
+            nuevasVariantes[idx] = { ...v, stock: stockResultante, stock_reservado: Math.max(0, (v.stock_reservado || 0) - cantidad) };
+          } else {
+            nuevasVariantes[idx] = { ...v, stock_reservado: Math.max(0, (v.stock_reservado || 0) - cantidad) };
+          }
+          tx.update(productRef, { variantes: nuevasVariantes });
+          tx.set(stockMovRef, {
+            product_id: r.product_id, variant_id: r.variant_id, warehouse_id: DEFAULT_WAREHOUSE_ID,
+            tipo: accion === "entregar" ? "entrega" : "liberacion_reserva",
+            cantidad: accion === "entregar" ? -cantidad : cantidad, stock_resultante: stockResultante,
+            referencia_id: reservationId, motivo: "", usuario: currentUser?.email || "sistema", fecha: nowISO(),
+          });
+        }
+      } else {
+        let stockResultante = p.stock;
+        if (accion === "entregar") {
+          stockResultante = Math.max(0, (p.stock || 0) - cantidad);
+          tx.update(productRef, {
+            stock: stockResultante,
+            stock_reservado: Math.max(0, (p.stock_reservado || 0) - cantidad),
+            stock_vendido: (p.stock_vendido || 0) + cantidad,
+          });
+        } else {
+          tx.update(productRef, {
+            stock_reservado: Math.max(0, (p.stock_reservado || 0) - cantidad),
+            estado: p.estado === "reservado" ? "disponible" : p.estado,
+          });
+        }
+        tx.set(stockMovRef, {
+          product_id: r.product_id, variant_id: null, warehouse_id: DEFAULT_WAREHOUSE_ID,
+          tipo: accion === "entregar" ? "entrega" : "liberacion_reserva",
+          cantidad: accion === "entregar" ? -cantidad : cantidad, stock_resultante: stockResultante,
+          referencia_id: reservationId, motivo: "", usuario: currentUser?.email || "sistema", fecha: nowISO(),
+        });
+      }
+    }
+    tx.update(reservationRef, accion === "entregar"
+      ? { estado: "entregado", entregado_at: nowISO() }
+      : { estado: "cancelado" });
+  });
+  return { sinProducto };
+}
+/* Registra una venta manual y descuenta stock de forma atómica. A
+   diferencia de la reserva pública, esto NO bloquea la venta si el stock
+   registrado no alcanza — es un evento que ya ocurrió en la vida real
+   (una venta en persona, por ejemplo) y el trabajo del sistema es
+   registrarlo con precisión, no impedirlo. En cambio, avisa claramente
+   cuando el inventario registrado no cuadra, en vez de fallar en silencio. */
+async function venderProductoTransaccion({ productId, cantidad, saleData }) {
+  const productRef = productId ? db.collection("products").doc(productId) : null;
+  const saleRef = db.collection("sales").doc();
+  const stockMovRef = db.collection("stock_movements").doc();
+  let stockInsuficiente = false;
+  await db.runTransaction(async (tx) => {
+    let stockResultante = null;
+    let stockVendidoPrevio = 0;
+    if (productRef) {
+      const snap = await tx.get(productRef);
+      if (snap.exists) {
+        const p = snap.data();
+        const disponible = p.stock || 0;
+        if (cantidad > disponible) stockInsuficiente = true;
+        stockResultante = Math.max(0, disponible - cantidad);
+        stockVendidoPrevio = p.stock_vendido || 0;
+        tx.update(productRef, { stock: stockResultante, stock_vendido: stockVendidoPrevio + cantidad });
+      }
+    }
+    tx.set(saleRef, saleData);
+    if (productRef && stockResultante !== null) {
+      tx.set(stockMovRef, {
+        product_id: productId, variant_id: null, warehouse_id: DEFAULT_WAREHOUSE_ID,
+        tipo: "venta", cantidad: -cantidad, stock_resultante: stockResultante, referencia_id: saleRef.id,
+        motivo: "", usuario: currentUser?.email || "sistema", fecha: nowISO(),
+      });
+    }
+  });
+  return { id: saleRef.id, stockInsuficiente };
+}
+/* Suma stock (compra que repone inventario, o devolución que lo regresa) y
+   crea el documento correspondiente + su kardex en la misma transacción.
+   Es la misma idea que venderProductoTransaccion pero sumando en vez de
+   restando — se usa desde savePurchase() y saveReturn(). */
+async function sumarStockTransaccion({ productId, cantidad, tipo, coleccion, docData, motivo }) {
+  const productRef = productId ? db.collection("products").doc(productId) : null;
+  const docRef = db.collection(coleccion).doc();
+  const stockMovRef = db.collection("stock_movements").doc();
+  await db.runTransaction(async (tx) => {
+    let stockResultante = null;
+    if (productRef) {
+      const snap = await tx.get(productRef);
+      if (snap.exists) {
+        const p = snap.data();
+        stockResultante = (p.stock || 0) + cantidad;
+        tx.update(productRef, { stock: stockResultante });
+      }
+    }
+    tx.set(docRef, docData);
+    if (productRef && stockResultante !== null) {
+      tx.set(stockMovRef, {
+        product_id: productId, variant_id: null, warehouse_id: DEFAULT_WAREHOUSE_ID,
+        tipo, cantidad, stock_resultante: stockResultante, referencia_id: docRef.id,
+        motivo: motivo || "", usuario: currentUser?.email || "sistema", fecha: nowISO(),
+      });
+    }
+  });
+  return { id: docRef.id };
 }
 /* ---------------- HISTORIAL DE AUDITORÍA — snapshot del producto en cada guardado ---------------- */
 async function logProductHistory(productId, accion, data) {
@@ -1516,36 +1712,29 @@ async function pdSubmit(e, productId) {
   const costoDelivery = zona?.costo || 0;
   const entrega = tipoEntregaInfo(st.fechaEntrega, precioEfectivo);
   const total = +(precioEfectivo + costoDelivery).toFixed(2);
-  const numeroOrden = `NH-${new Date().getFullYear()}-${String(DB.reservations.length + 1).padStart(6, "0")}`;
+  const numeroOrden = `NH-${new Date().getFullYear()}-${Date.now().toString(36).slice(-6).toUpperCase()}`;
 
   try {
-    const reservation = await crudInsert("reservations", {
-      numero_orden: numeroOrden, cliente_nombre: st.nombre, cliente_whatsapp: st.whatsapp,
-      cliente_correo: st.correo || null, direccion: st.direccion || null,
-      product_id: product.id, producto_nombre: product.nombre, talla: st.talla || null, color: st.color || null,
-      variant_id: variante?.id || null, variant_sku: variante?.sku || null, variant_combinacion: variante?.combinacion || null,
-      cantidad: 1, delivery_zone_id: st.zonaId || null, zona_nombre: zona?.nombre || null,
-      precio_producto: precioEfectivo, costo_producto: product.costo_compra,
-      monto_reserva: entrega.montoReserva, tipo_entrega: entrega.esInmediato ? "inmediato" : "reserva",
-      fecha_entrega: st.fechaEntrega || null, costo_delivery: costoDelivery, total_a_pagar: total,
-      metodo_pago: st.metodoPago, comprobante_url: st.comprobante || null,
-      estado: st.comprobante ? "comprobante_recibido" : "pendiente", origen: "web",
-      created_at: nowISO(), expira_at: new Date(Date.now() + 24 * 3600000).toISOString(),
-    });
-
-    if (tieneVariantes) {
-      const nuevasVariantes = product.variantes.map((v) => v.id === variante.id ? { ...v, stock_reservado: (v.stock_reservado || 0) + 1 } : v);
-      await crudUpdate("products", product.id, { variantes: nuevasVariantes });
-    } else {
-      await crudUpdate("products", product.id, {
-        stock_reservado: (product.stock_reservado || 0) + 1,
-        estado: disponible - 1 <= 0 ? "reservado" : product.estado,
-      });
-    }
-    logStockMovement({
-      productId: product.id, variantId: variante?.id, tipo: "reserva", cantidad: 1,
-      stockResultante: tieneVariantes ? variante.stock : product.stock, referenciaId: reservation.id,
-      motivo: `Reserva ${numeroOrden} — ${st.nombre}`,
+    /* Reserva el stock y crea la reserva (+ su movimiento de kardex) en una
+       sola transacción atómica contra el servidor — si otro cliente se
+       adelantó por la última unidad entre que esta persona cargó la página
+       y confirmó el pedido, esto lo detecta de verdad y lanza SIN_STOCK en
+       vez de sobrevender. */
+    const reservation = await reservarStockTransaccion({
+      productId: product.id, variantId: variante?.id || null,
+      reservationData: {
+        numero_orden: numeroOrden, cliente_nombre: st.nombre, cliente_whatsapp: st.whatsapp,
+        cliente_correo: st.correo || null, direccion: st.direccion || null,
+        product_id: product.id, producto_nombre: product.nombre, talla: st.talla || null, color: st.color || null,
+        variant_id: variante?.id || null, variant_sku: variante?.sku || null, variant_combinacion: variante?.combinacion || null,
+        cantidad: 1, delivery_zone_id: st.zonaId || null, zona_nombre: zona?.nombre || null,
+        precio_producto: precioEfectivo, costo_producto: product.costo_compra,
+        monto_reserva: entrega.montoReserva, tipo_entrega: entrega.esInmediato ? "inmediato" : "reserva",
+        fecha_entrega: st.fechaEntrega || null, costo_delivery: costoDelivery, total_a_pagar: total,
+        metodo_pago: st.metodoPago, comprobante_url: st.comprobante || null,
+        estado: st.comprobante ? "comprobante_recibido" : "pendiente", origen: "web",
+        created_at: nowISO(), expira_at: new Date(Date.now() + 24 * 3600000).toISOString(),
+      },
     });
 
     if (st.comprobante) {
@@ -1576,7 +1765,9 @@ async function pdSubmit(e, productId) {
     window.scrollTo(0, 0);
   } catch (err) {
     st.submitting = false;
-    st.errorMsg = "No pudimos guardar tu reserva. Verifica tu conexión e intenta de nuevo.";
+    st.errorMsg = err?.message === "SIN_STOCK"
+      ? "Justo se agotó — alguien más reservó la última unidad. Elegí otra opción o volvé a intentarlo más tarde."
+      : "No pudimos guardar tu reserva. Verifica tu conexión e intenta de nuevo.";
     renderRoute();
   }
 }
@@ -2416,7 +2607,7 @@ async function pmAddDoc(e) {
   productModalState.uploadingDoc = false;
   renderProductModal();
 }
-function pmRemoveDoc(i) { productModalState.documentos.splice(i, 1); renderProductModal(); }
+function pmRemoveDoc(i) { tryDeleteStorageFile(productModalState.documentos[i]?.url); productModalState.documentos.splice(i, 1); renderProductModal(); }
 async function pmAddMedia(e) {
   const files = Array.from(e.target.files || []);
   if (!files.length) return;
@@ -2434,7 +2625,14 @@ async function pmAddMedia(e) {
   productModalState.uploading = false;
   renderProductModal();
 }
-function pmRemoveMedia(i) { syncProductFieldsFromDOM(); productModalState.media.splice(i, 1); renderProductModal(); }
+function pmRemoveMedia(i) {
+  syncProductFieldsFromDOM();
+  const removed = productModalState.media[i];
+  tryDeleteStorageFile(removed?.url);
+  if (removed?.thumbUrl) tryDeleteStorageFile(removed.thumbUrl);
+  productModalState.media.splice(i, 1);
+  renderProductModal();
+}
 let pmDragIndex = null;
 function pmDragStart(i) { pmDragIndex = i; }
 function pmDrop(i) {
@@ -2560,6 +2758,10 @@ function checkDuplicateProduct({ nombre, codigoBarras, sku, excludeId, variantSk
 }
 function deleteProduct(id) {
   if (!confirmar("¿Eliminar este producto?")) return;
+  const p = findById("products", id);
+  (p?.media || []).forEach((m) => { tryDeleteStorageFile(m.url); if (m.thumbUrl) tryDeleteStorageFile(m.thumbUrl); });
+  (p?.documentos || []).forEach((d) => tryDeleteStorageFile(d.url));
+  (p?.variantes || []).forEach((v) => { if (v.imagen_url) tryDeleteStorageFile(v.imagen_url); });
   crudDelete("products", id); toast("Producto eliminado"); renderRoute();
 }
 const MOVIMIENTO_LABELS = {
@@ -2989,26 +3191,35 @@ function svUpdateTotal() {
   const desc = parseFloat(document.getElementById("s_descuento").value) || 0;
   document.getElementById("s_totalPreview").textContent = money(cant * precio - desc);
 }
-function saveSale() {
+async function saveSale() {
   const sel = document.getElementById("s_producto");
   const product = findById("products", sel.value);
   const cantidad = parseFloat(document.getElementById("s_cantidad").value) || 0;
   const precio = parseFloat(document.getElementById("s_precio").value) || 0;
   const descuento = parseFloat(document.getElementById("s_descuento").value) || 0;
+  if (cantidad <= 0) { toast("La cantidad debe ser mayor a 0"); return; }
+  if (precio < 0 || descuento < 0) { toast("El precio y el descuento no pueden ser negativos"); return; }
   const total = cantidad * precio - descuento;
   const utilidad = (precio - (product?.costo_compra || 0)) * cantidad - descuento;
-  crudInsert("sales", {
-    fecha: todayStr(), cliente_nombre: document.getElementById("s_cliente").value || null, product_id: product?.id,
-    producto_nombre: product?.nombre, cantidad, precio_unitario: precio, descuento, total, utilidad,
-    canal: document.getElementById("s_canal").value, metodo_pago: document.getElementById("s_metodo").value,
-    vendedor: document.getElementById("s_vendedor").value || null,
-  }).then((sale) => {
-    if (!product) return;
-    const nuevoStock = Math.max(0, (product.stock || 0) - cantidad);
-    crudUpdate("products", product.id, { stock: nuevoStock, stock_vendido: (product.stock_vendido || 0) + cantidad });
-    logStockMovement({ productId: product.id, tipo: "venta", cantidad: -cantidad, stockResultante: nuevoStock, referenciaId: sale.id });
-  });
-  closeModal(); toast("Venta registrada"); renderRoute();
+  const btn = document.querySelector(".modal .btn-rose");
+  if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
+  try {
+    const { stockInsuficiente } = await venderProductoTransaccion({
+      productId: product?.id, cantidad,
+      saleData: {
+        fecha: todayStr(), cliente_nombre: document.getElementById("s_cliente").value || null, product_id: product?.id,
+        producto_nombre: product?.nombre, cantidad, precio_unitario: precio, descuento, total, utilidad,
+        canal: document.getElementById("s_canal").value, metodo_pago: document.getElementById("s_metodo").value,
+        vendedor: document.getElementById("s_vendedor").value || null,
+      },
+    });
+    closeModal();
+    toast(stockInsuficiente ? "Venta registrada — el stock registrado no alcanzaba para esta cantidad, quedó en 0. Revisá el inventario." : "Venta registrada");
+    renderRoute();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "Registrar venta"; }
+    toast("Error al registrar la venta: " + e.message);
+  }
 }
 function deleteSale(id) { if (!confirmar("¿Eliminar esta venta?")) return; crudDelete("sales", id); renderRoute(); }
 
@@ -3069,52 +3280,38 @@ function verComprobante(reservationId) {
     <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>
   `);
 }
-function marcarReservaEntregada(id) {
+/* Evita procesar la misma reserva dos veces si alguien hace doble clic
+   antes de que la pantalla se vuelva a dibujar — resolverReservaTransaccion
+   ya es idempotente por sí sola (revisa el estado dentro de la transacción),
+   este set solo ahorra una segunda llamada de red innecesaria. */
+const reservaAccionesEnCurso = new Set();
+async function marcarReservaEntregada(id) {
+  if (reservaAccionesEnCurso.has(id)) return;
   if (!confirmar("¿Marcar esta reserva como entregada? Se restará del inventario.")) return;
-  const r = findById("reservations", id);
-  const p = r ? findById("products", r.product_id) : null;
-  if (p && r.variant_id && p.variantes) {
-    const v = p.variantes.find((x) => x.id === r.variant_id);
-    const nuevoStock = Math.max(0, (v?.stock || 0) - (r.cantidad || 1));
-    const nuevasVariantes = p.variantes.map((x) => x.id === r.variant_id
-      ? { ...x, stock: nuevoStock, stock_reservado: Math.max(0, (x.stock_reservado || 0) - (r.cantidad || 1)) }
-      : x);
-    crudUpdate("products", p.id, { variantes: nuevasVariantes });
-    logStockMovement({ productId: p.id, variantId: r.variant_id, tipo: "entrega", cantidad: -(r.cantidad || 1), stockResultante: nuevoStock, referenciaId: id });
-  } else if (p) {
-    const nuevoStock = Math.max(0, (p.stock || 0) - (r.cantidad || 1));
-    crudUpdate("products", p.id, {
-      stock: nuevoStock,
-      stock_reservado: Math.max(0, (p.stock_reservado || 0) - (r.cantidad || 1)),
-      stock_vendido: (p.stock_vendido || 0) + (r.cantidad || 1),
-    });
-    logStockMovement({ productId: p.id, tipo: "entrega", cantidad: -(r.cantidad || 1), stockResultante: nuevoStock, referenciaId: id });
+  reservaAccionesEnCurso.add(id);
+  try {
+    await resolverReservaTransaccion(id, "entregar");
+    toast("Reserva marcada como entregada");
+  } catch (e) {
+    toast(e?.message === "YA_RESUELTA" ? "Esta reserva ya se había resuelto." : "No se pudo actualizar la reserva: " + e.message);
+  } finally {
+    reservaAccionesEnCurso.delete(id);
+    renderRoute();
   }
-  crudUpdate("reservations", id, { estado: "entregado", entregado_at: nowISO() });
-  toast("Reserva marcada como entregada");
-  renderRoute();
 }
-function cancelarReserva(id) {
+async function cancelarReserva(id) {
+  if (reservaAccionesEnCurso.has(id)) return;
   if (!confirmar("¿Cancelar esta reserva? El producto vuelve a estar disponible.")) return;
-  const r = findById("reservations", id);
-  const p = r ? findById("products", r.product_id) : null;
-  if (p && r.variant_id && p.variantes) {
-    const nuevasVariantes = p.variantes.map((x) => x.id === r.variant_id
-      ? { ...x, stock_reservado: Math.max(0, (x.stock_reservado || 0) - (r.cantidad || 1)) }
-      : x);
-    crudUpdate("products", p.id, { variantes: nuevasVariantes });
-    const v = nuevasVariantes.find((x) => x.id === r.variant_id);
-    logStockMovement({ productId: p.id, variantId: r.variant_id, tipo: "liberacion_reserva", cantidad: r.cantidad || 1, stockResultante: v?.stock, referenciaId: id });
-  } else if (p) {
-    crudUpdate("products", p.id, {
-      stock_reservado: Math.max(0, (p.stock_reservado || 0) - (r.cantidad || 1)),
-      estado: p.estado === "reservado" ? "disponible" : p.estado,
-    });
-    logStockMovement({ productId: p.id, tipo: "liberacion_reserva", cantidad: r.cantidad || 1, stockResultante: p.stock, referenciaId: id });
+  reservaAccionesEnCurso.add(id);
+  try {
+    await resolverReservaTransaccion(id, "cancelar");
+    toast("Reserva cancelada");
+  } catch (e) {
+    toast(e?.message === "YA_RESUELTA" ? "Esta reserva ya se había resuelto." : "No se pudo cancelar la reserva: " + e.message);
+  } finally {
+    reservaAccionesEnCurso.delete(id);
+    renderRoute();
   }
-  crudUpdate("reservations", id, { estado: "cancelado" });
-  toast("Reserva cancelada");
-  renderRoute();
 }
 
 /* ================================================================
@@ -3160,23 +3357,27 @@ function cvUpdateTotal() {
   const q = parseFloat(document.getElementById("c_cantidad").value) || 0, u = parseFloat(document.getElementById("c_costoUnitario").value) || 0;
   document.getElementById("c_totalPreview").textContent = money(q * u);
 }
-function savePurchase() {
+async function savePurchase() {
   const cantidad = parseFloat(document.getElementById("c_cantidad").value) || 0;
   const costoUnitario = parseFloat(document.getElementById("c_costoUnitario").value) || 0;
   const afecta = document.getElementById("c_afecta").checked;
   const productId = afecta ? document.getElementById("c_producto").value : null;
-  crudInsert("purchases", {
+  if (afecta && cantidad <= 0) { toast("La cantidad debe ser mayor a 0"); return; }
+  const purchaseData = {
     fecha: todayStr(), tipo: document.getElementById("c_tipo").value, descripcion: document.getElementById("c_descripcion").value,
     proveedor: document.getElementById("c_proveedor").value, cantidad, costo_unitario: costoUnitario, costo_total: cantidad * costoUnitario,
     afecta_inventario: afecta, product_id: productId,
-  }).then((purchase) => {
-    if (!(afecta && productId)) return;
-    const p = findById("products", productId);
-    const nuevoStock = (p.stock || 0) + cantidad;
-    crudUpdate("products", productId, { stock: nuevoStock });
-    logStockMovement({ productId, tipo: "compra", cantidad, stockResultante: nuevoStock, referenciaId: purchase.id });
-  });
-  closeModal(); toast("Compra registrada"); renderRoute();
+  };
+  try {
+    if (afecta && productId) {
+      await sumarStockTransaccion({ productId, cantidad, tipo: "compra", coleccion: "purchases", docData: purchaseData });
+    } else {
+      await crudInsert("purchases", purchaseData);
+    }
+    closeModal(); toast("Compra registrada"); renderRoute();
+  } catch (e) {
+    toast("Error al registrar la compra: " + e.message);
+  }
 }
 function deletePurchase(id) { if (!confirmar("¿Eliminar esta compra?")) return; crudDelete("purchases", id); renderRoute(); }
 
@@ -3360,23 +3561,24 @@ function dvUpdateInfo() {
   document.getElementById("dv_info").textContent = `Cantidad vendida: ${sale.cantidad} · Precio unitario: ${money(sale.total / sale.cantidad)} · Disponible para devolver: ${disponible}`;
   document.getElementById("dv_cantidad").max = disponible;
 }
-function saveReturn() {
+async function saveReturn() {
   const sale = findById("sales", document.getElementById("dv_venta").value);
   const cantidad = parseInt(document.getElementById("dv_cantidad").value) || 0;
   const yaDevuelto = DB.returns.filter((r) => r.sale_id === sale.id).reduce((s, r) => s + r.cantidad, 0);
   if (cantidad <= 0 || cantidad > sale.cantidad - yaDevuelto) { toast("Cantidad inválida"); return; }
   const motivo = document.getElementById("dv_motivo").value;
   const perUnitTotal = sale.total / sale.cantidad, perUnitUtilidad = sale.utilidad / sale.cantidad;
-  crudInsert("returns", { sale_id: sale.id, fecha: todayStr(), producto_nombre: sale.producto_nombre, cliente_nombre: sale.cliente_nombre, cantidad, motivo, monto: cantidad * perUnitTotal, utilidad_impacto: cantidad * perUnitUtilidad })
-    .then((ret) => {
-      if (motivo === "Producto dañado" || !sale.product_id) return;
-      const p = findById("products", sale.product_id);
-      if (!p) return;
-      const nuevoStock = (p.stock || 0) + cantidad;
-      crudUpdate("products", p.id, { stock: nuevoStock });
-      logStockMovement({ productId: p.id, tipo: "devolucion", cantidad, stockResultante: nuevoStock, referenciaId: ret.id, motivo });
-    });
-  closeModal(); toast("Devolución registrada"); renderRoute();
+  const returnData = { sale_id: sale.id, fecha: todayStr(), producto_nombre: sale.producto_nombre, cliente_nombre: sale.cliente_nombre, cantidad, motivo, monto: cantidad * perUnitTotal, utilidad_impacto: cantidad * perUnitUtilidad };
+  try {
+    if (motivo !== "Producto dañado" && sale.product_id) {
+      await sumarStockTransaccion({ productId: sale.product_id, cantidad, tipo: "devolucion", coleccion: "returns", docData: returnData, motivo });
+    } else {
+      await crudInsert("returns", returnData);
+    }
+    closeModal(); toast("Devolución registrada"); renderRoute();
+  } catch (e) {
+    toast("Error al registrar la devolución: " + e.message);
+  }
 }
 function deleteReturn(id) { if (!confirmar("¿Eliminar este registro?")) return; crudDelete("returns", id); renderRoute(); }
 
