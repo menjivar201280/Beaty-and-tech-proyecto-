@@ -2527,18 +2527,28 @@ function pmShowKardex(productId) {
     <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>
   `);
 }
+/* El QR se genera con el servicio público goqr.me (api.qrserver.com) — la
+   codificación real la hace ese servicio, no código propio, para no
+   arriesgarnos a producir un gráfico que se vea bien pero no escanee. El
+   código de barras/SKU se deja como texto: no hay forma confiable de
+   generar un Code128 real sin una librería dedicada. */
 function pmShowBarcode(productId) {
   const p = findById("products", productId);
   if (!p) return;
   const codigo = p.codigo_barras || p.sku;
   const link = `${window.location.origin}${window.location.pathname}#/producto/${p.slug}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(link)}`;
   openModal(`
     <h3>Código de producto — ${esc(p.nombre)}</h3>
-    <p class="muted" style="font-size:12px;">Este sitio no genera el gráfico de barras/QR escaneable en el navegador (necesitaría una librería especializada para que el código realmente funcione al escanearlo). Acá tenés el valor listo para copiar y pegar en tu impresora de etiquetas o en un generador de códigos online.</p>
+    <div class="text-center" style="margin-bottom:12px;">
+      <img src="${qrUrl}" alt="Código QR de ${esc(p.nombre)}" width="260" height="260" style="border-radius:8px;border:1px solid var(--border);background:#fff;">
+      <p class="muted" style="font-size:11px;margin-top:6px;">Generado por un servicio externo (goqr.me) a partir del enlace del producto — apuntale la cámara para probarlo. Clic derecho → Guardar imagen para descargarlo o imprimirlo. Necesita conexión a internet para cargar.</p>
+    </div>
+    <p class="muted" style="font-size:12px;">El código de barras/SKU no se genera como gráfico (necesitaría una librería especializada de Code128 para que funcione al escanearlo con un lector físico). Acá tenés el valor para copiar y pegar en tu impresora de etiquetas o en un generador de barras online.</p>
     <div class="field"><label class="flabel">Código de barras / SKU</label>
       <div class="flex gap-2"><input readonly value="${esc(codigo)}" style="font-family:monospace;font-size:15px;font-weight:700;"><button type="button" class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('${esc(codigo)}');toast('Copiado')">Copiar</button></div>
     </div>
-    <div class="field"><label class="flabel">Enlace para código QR</label>
+    <div class="field"><label class="flabel">Enlace codificado en el QR</label>
       <div class="flex gap-2"><input readonly value="${esc(link)}" style="font-family:monospace;font-size:12px;"><button type="button" class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('${esc(link)}');toast('Copiado')">Copiar</button></div>
     </div>
     <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>
