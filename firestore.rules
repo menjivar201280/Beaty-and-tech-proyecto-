@@ -1,8 +1,27 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // CRÍTICO: "admin" significa "está en la lista blanca admins/{uid}", NO
+    // simplemente "tiene sesión iniciada". Antes esta función devolvía
+    // request.auth != null, lo cual significaba que CUALQUIER cuenta creada
+    // vía el proveedor Email/Password de Firebase Auth (que debe estar
+    // habilitado para que el login de admin exista) obtenía acceso total de
+    // lectura/escritura a ventas, compras, clientes, comprobantes, precios
+    // e inventario — Firebase Auth permite auto-registro con
+    // createUserWithEmailAndPassword() a cualquiera con la apiKey pública
+    // (siempre visible en el código del cliente, eso es normal), sin pasar
+    // por la pantalla de login de la app. exists() no requiere permiso de
+    // lectura aparte sobre admins/ — se evalúa como parte de la regla.
+    //
+    // Requiere acción manual antes de publicar: crear un documento en la
+    // colección admins/ con ID = el UID real de cada administrador (el
+    // panel admin ya muestra "UID: ... copiar" en la barra lateral). Si
+    // publicas esta regla sin haber creado ese documento primero, el propio
+    // panel admin pierde acceso a todo excepto el catálogo público
+    // (isAdmin() empieza a devolver false para todos, incluido el dueño).
     function isAdmin() {
-      return request.auth != null;
+      return request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
     // Umbral de inventario válido: sin configurar (null) o entero >= 0.
     // Bloquea negativos/decimales aunque alguien salte la validación del
@@ -33,8 +52,18 @@ service cloud.firestore {
         && request.resource.data.stock_reservado is int
         && request.resource.data.stock_reservado >= resource.data.stock_reservado
         && request.resource.data.stock_reservado <= resource.data.stock_reservado + 20;
+      // El caso con variantes no se puede validar campo por campo dentro de
+      // cada elemento del arreglo (Firestore Rules no tiene forma de
+      // recorrer/comparar elemento a elemento una lista de mapas) — riesgo
+      // residual documentado y aceptado. Sí se puede exigir que el arreglo
+      // conserve su tamaño, lo que bloquea el ataque más dañino: que un
+      // visitante borre variantes (perdiendo su historial de precio/SKU) o
+      // inyecte variantes falsas escribiendo directo a Firestore fuera de
+      // la transacción de reserva.
       allow update: if !isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['variantes']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['variantes'])
+        && request.resource.data.variantes is list
+        && request.resource.data.variantes.size() == resource.data.variantes.size();
     }
     match /delivery_zones/{id} { allow read: if true; allow write: if isAdmin(); }
     match /attributes/{id} { allow read: if true; allow write: if isAdmin(); }
@@ -47,10 +76,24 @@ service cloud.firestore {
     // contenido, aunque tampoco reemplaza una revisión completa de esquema
     // (ver informe: no se pudo probar contra un emulador real de Firestore).
     match /reservations/{id} {
+      // exists() confirma que product_id corresponde a un producto real
+      // (evita reservas basura apuntando a IDs inventados). Los campos de
+      // texto libre que llena el visitante (nombre, whatsapp) llevan un
+      // tope de tamaño razonable — Firestore ya limita el documento a 1MiB,
+      // pero esto evita que alguien use el formulario para inflar
+      // documentos con strings enormes. comprobante_url, si viene, debe ser
+      // una URL corta de Storage — un data: URI base64 real mide miles de
+      // caracteres, así que este tope también bloquea, en la capa de
+      // reglas, que alguien reintroduzca comprobantes embebidos en base64
+      // saltándose el formulario (que ya sube a Storage).
       allow create: if request.resource.data.estado in ['pendiente', 'comprobante_recibido']
         && request.resource.data.product_id is string && request.resource.data.product_id.size() > 0
+        && exists(/databases/$(database)/documents/products/$(request.resource.data.product_id))
         && request.resource.data.cantidad is int && request.resource.data.cantidad > 0 && request.resource.data.cantidad <= 20
-        && request.resource.data.total_a_pagar is number && request.resource.data.total_a_pagar >= 0;
+        && request.resource.data.total_a_pagar is number && request.resource.data.total_a_pagar >= 0
+        && request.resource.data.cliente_nombre is string && request.resource.data.cliente_nombre.size() > 0 && request.resource.data.cliente_nombre.size() <= 200
+        && request.resource.data.cliente_whatsapp is string && request.resource.data.cliente_whatsapp.size() > 0 && request.resource.data.cliente_whatsapp.size() <= 40
+        && (!('comprobante_url' in request.resource.data) || request.resource.data.comprobante_url == null || (request.resource.data.comprobante_url is string && request.resource.data.comprobante_url.size() <= 2000));
       allow read, update, delete: if isAdmin();
     }
     match /stock_movements/{id} {
@@ -60,12 +103,17 @@ service cloud.firestore {
       allow create: if isAdmin()
         || (request.resource.data.tipo == 'reserva'
           && request.resource.data.product_id is string && request.resource.data.product_id.size() > 0
-          && request.resource.data.cantidad is number);
+          && request.resource.data.cantidad is number && request.resource.data.cantidad > 0 && request.resource.data.cantidad <= 20);
       allow read, update, delete: if isAdmin();
     }
     match /payment_proofs/{id} {
+      // exists() liga el comprobante a una reserva real ya creada (no se
+      // puede subir un comprobante "flotante"). El tope de tamaño en
+      // archivo_url bloquea, igual que en reservations, que alguien
+      // escriba un data: URI base64 aquí en vez de una URL de Storage.
       allow create: if request.resource.data.reservation_id is string && request.resource.data.reservation_id.size() > 0
-        && request.resource.data.archivo_url is string && request.resource.data.archivo_url.size() > 0
+        && exists(/databases/$(database)/documents/reservations/$(request.resource.data.reservation_id))
+        && request.resource.data.archivo_url is string && request.resource.data.archivo_url.size() > 0 && request.resource.data.archivo_url.size() <= 2000
         && request.resource.data.estado == 'pendiente';
       allow read, update, delete: if isAdmin();
     }
@@ -78,9 +126,24 @@ service cloud.firestore {
       // Los únicos tipos que el checkout público genera — cualquier otro
       // tipo de notificación (respaldo, sistema, etc.) es interno/admin.
       allow create: if request.resource.data.tipo in ['nueva_reserva', 'comprobante_subido']
-        && request.resource.data.titulo is string && request.resource.data.mensaje is string
+        && request.resource.data.titulo is string && request.resource.data.titulo.size() <= 300
+        && request.resource.data.mensaje is string && request.resource.data.mensaje.size() <= 2000
         && request.resource.data.leida == false;
       allow read, update, delete: if isAdmin();
+    }
+
+    // Lista blanca de administradores. Un documento existe (con cualquier
+    // contenido, el ID es lo único que importa) por cada UID autorizado.
+    // Escritura SIEMPRE bloqueada desde el cliente — ni siquiera un admin ya
+    // autenticado puede agregarse a sí mismo o a otro UID por esta vía, para
+    // que comprometer una sesión de admin no baste para auto-otorgar más
+    // acceso. Solo se crea/borra manualmente desde Firebase Console. Se
+    // permite que cada usuario lea únicamente su propio documento, útil
+    // para que el panel confirme "ya estás en la lista" sin exponer la
+    // lista completa de administradores a cualquiera con sesión iniciada.
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
     }
 
     // Todo lo demás (ventas, compras, gastos, clientes, proveedores, etc.)

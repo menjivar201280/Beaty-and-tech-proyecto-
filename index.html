@@ -550,17 +550,27 @@ const SEED_ZONES = [
 ];
 const SEED_SETTINGS = { business_name: "NAHUI", currency: "$", maneja_iva: false, iva: 0, meta_mensual: 1000 };
 
-/* Colecciones que se sincronizan en tiempo real con Firestore */
+/* Colecciones que se sincronizan en tiempo real con Firestore.
+   "product_history" A PROPÓSITO no está acá — a diferencia de
+   stock_movements (que sí se navega globalmente en /admin/inventario),
+   product_history solo se consulta acotado a UN producto a la vez, en la
+   pestaña Historial. Si estuviera en esta lista, cada sesión de admin
+   descargaría la colección COMPLETA de principio a fin en cada carga —
+   nada grave con pocos productos, pero después de meses de uso real, con
+   una fila nueva por cada guardado de cada producto, ese listener global
+   crece sin límite y nadie lo estaría usando así. Se consulta bajo demanda
+   con loadProductHistory(). */
 const COLLECTIONS = [
   "categories", "products", "delivery_zones", "reservations", "sales", "purchases", "expenses",
   "cash_registers", "clients", "suppliers", "promotions", "deliveries", "returns", "wishlist",
   "admin_users", "notifications", "payment_proofs", "attributes",
-  "warehouses", "stock_movements", "product_history",
+  "warehouses", "stock_movements",
 ];
 const DEFAULT_WAREHOUSE_ID = "bodega_principal";
 
 const DB = {};
 COLLECTIONS.forEach((name) => { DB[name] = []; });
+DB.product_history = [];
 DB.settings = { ...SEED_SETTINGS };
 
 /* ---------------- BASE DE DATOS EN TIEMPO REAL (Firestore) ---------------- */
@@ -570,17 +580,29 @@ function scheduleRender() {
   renderScheduled = true;
   Promise.resolve().then(() => { renderScheduled = false; if (window._bootDone) renderRoute(); });
 }
+/* Se reconecta cada vez que cambia el estado de sesión (login/logout), no
+   solo una vez al arrancar. Motivo: un visitante anónimo recibe
+   "permission-denied" en colecciones que exigen admin (reservas, ventas,
+   comprobantes...) porque el listener se abrió sin sesión — Firestore no
+   reintenta solo un listener rechazado por reglas cuando después el
+   usuario inicia sesión, así que sin esto el panel admin podía quedarse
+   con esas colecciones vacías tras loguearse hasta recargar la página a
+   mano. unsubscribe() + volver a suscribir con el token ya autenticado
+   corrige esto de raíz. */
+let realtimeUnsubscribers = [];
 function attachRealtimeListeners() {
+  realtimeUnsubscribers.forEach((unsub) => unsub());
+  realtimeUnsubscribers = [];
   COLLECTIONS.forEach((name) => {
-    db.collection(name).onSnapshot(
+    realtimeUnsubscribers.push(db.collection(name).onSnapshot(
       (snap) => { DB[name] = snap.docs.map((d) => ({ id: d.id, ...d.data() })); scheduleRender(); },
       (err) => { console.error("onSnapshot", name, err); }
-    );
+    ));
   });
-  db.collection("meta").doc("settings").onSnapshot(
+  realtimeUnsubscribers.push(db.collection("meta").doc("settings").onSnapshot(
     (doc) => { DB.settings = doc.exists ? doc.data() : { ...SEED_SETTINGS }; scheduleRender(); },
     (err) => { console.error("onSnapshot settings", err); }
-  );
+  ));
 }
 /* IMPORTANTE: nunca vuelve a sembrar SEED_PRODUCTS (auditoría — eran productos
    de ejemplo con precios/fotos inventados, no aptos para mostrarse a clientes
@@ -983,7 +1005,10 @@ async function resolverReservaTransaccion(reservationId, accion) {
           let stockResultante = v.stock;
           if (accion === "entregar") {
             stockResultante = Math.max(0, (v.stock || 0) - cantidad);
-            nuevasVariantes[idx] = { ...v, stock: stockResultante, stock_reservado: Math.max(0, (v.stock_reservado || 0) - cantidad) };
+            nuevasVariantes[idx] = {
+              ...v, stock: stockResultante, stock_reservado: Math.max(0, (v.stock_reservado || 0) - cantidad),
+              stock_vendido: (v.stock_vendido || 0) + cantidad,
+            };
           } else {
             nuevasVariantes[idx] = { ...v, stock_reservado: Math.max(0, (v.stock_reservado || 0) - cantidad) };
           }
@@ -992,7 +1017,9 @@ async function resolverReservaTransaccion(reservationId, accion) {
             product_id: r.product_id, variant_id: r.variant_id, warehouse_id: DEFAULT_WAREHOUSE_ID,
             tipo: accion === "entregar" ? "entrega" : "liberacion_reserva",
             cantidad: accion === "entregar" ? -cantidad : cantidad, stock_resultante: stockResultante,
-            referencia_id: reservationId, motivo: "", usuario: currentUser?.email || "sistema", fecha: nowISO(),
+            referencia_id: reservationId,
+            motivo: accion === "expirar" ? "Reserva vencida (24h sin completar el pago) — liberada automáticamente" : "",
+            usuario: currentUser?.email || "sistema", fecha: nowISO(),
           });
         }
       } else {
@@ -1014,15 +1041,55 @@ async function resolverReservaTransaccion(reservationId, accion) {
           product_id: r.product_id, variant_id: null, warehouse_id: DEFAULT_WAREHOUSE_ID,
           tipo: accion === "entregar" ? "entrega" : "liberacion_reserva",
           cantidad: accion === "entregar" ? -cantidad : cantidad, stock_resultante: stockResultante,
-          referencia_id: reservationId, motivo: "", usuario: currentUser?.email || "sistema", fecha: nowISO(),
+          referencia_id: reservationId,
+          motivo: accion === "expirar" ? "Reserva vencida (24h sin completar el pago) — liberada automáticamente" : "",
+          usuario: currentUser?.email || "sistema", fecha: nowISO(),
         });
       }
     }
     tx.update(reservationRef, accion === "entregar"
       ? { estado: "entregado", entregado_at: nowISO() }
-      : { estado: "cancelado" });
+      : accion === "expirar"
+        ? { estado: "liberado_al_stock", liberado_at: nowISO() }
+        : { estado: "cancelado" });
   });
   return { sinProducto };
+}
+/* PROBLEMA ESTRUCTURAL corregido: nada liberaba nunca una reserva vencida.
+   "expira_at" se guardaba y el texto "Expirada" aparecía en la lista de
+   /admin/reservas, pero eso es puramente visual — stock_reservado se
+   quedaba incrementado para siempre si el cliente nunca completaba el
+   pago. Con suficientes reservas abandonadas a lo largo de meses, esto es
+   "stock fantasma" real: unidades que existen físicamente pero que el
+   sistema cree ocupadas para siempre, sin ninguna venta detrás.
+   Esta función libera (vía resolverReservaTransaccion, la misma operación
+   atómica que "cancelar") toda reserva "pendiente" cuyo plazo de 24h ya
+   pasó. Una reserva con estado "comprobante_recibido" NUNCA se auto-libera
+   — si el cliente ya mandó comprobante, un humano tiene que revisarlo, no
+   el sistema.
+   Limitación real, no oculta: las reglas de Firestore (a propósito) solo
+   dejan bajar stock_reservado a un admin autenticado — no hay Cloud
+   Functions/cron en esta arquitectura, así que esto se ejecuta desde el
+   navegador del admin, no exactamente al minuto 1440. Se dispara (con un
+   límite de una vez cada 5 minutos) cada vez que se carga una pantalla del
+   panel admin — ver renderRoute(). Si nadie entra al panel, una reserva
+   vencida puede seguir "ocupando" stock hasta que alguien lo haga. */
+let ultimaRevisionExpiracion = 0;
+async function liberarReservasExpiradas() {
+  const ahora = Date.now();
+  if (ahora - ultimaRevisionExpiracion < 5 * 60000) return;
+  ultimaRevisionExpiracion = ahora;
+  const vencidas = DB.reservations.filter((r) =>
+    r.estado === "pendiente" && r.expira_at && new Date(r.expira_at).getTime() < ahora
+  );
+  for (const r of vencidas) {
+    try {
+      await resolverReservaTransaccion(r.id, "expirar");
+    } catch (e) {
+      if (e?.message !== "YA_RESUELTA") console.error("liberarReservasExpiradas", r.id, e);
+    }
+  }
+  if (vencidas.length) renderRoute();
 }
 /* Registra una venta manual y descuenta stock de forma atómica. A
    diferencia de la reserva pública, esto NO bloquea la venta si el stock
@@ -1030,29 +1097,51 @@ async function resolverReservaTransaccion(reservationId, accion) {
    (una venta en persona, por ejemplo) y el trabajo del sistema es
    registrarlo con precisión, no impedirlo. En cambio, avisa claramente
    cuando el inventario registrado no cuadra, en vez de fallar en silencio. */
-async function venderProductoTransaccion({ productId, cantidad, saleData }) {
+async function venderProductoTransaccion({ productId, variantId, cantidad, saleData }) {
   const productRef = productId ? db.collection("products").doc(productId) : null;
   const saleRef = db.collection("sales").doc();
   const stockMovRef = db.collection("stock_movements").doc();
   let stockInsuficiente = false;
   await db.runTransaction(async (tx) => {
     let stockResultante = null;
-    let stockVendidoPrevio = 0;
     if (productRef) {
       const snap = await tx.get(productRef);
       if (snap.exists) {
         const p = snap.data();
-        const disponible = p.stock || 0;
-        if (cantidad > disponible) stockInsuficiente = true;
-        stockResultante = Math.max(0, disponible - cantidad);
-        stockVendidoPrevio = p.stock_vendido || 0;
-        tx.update(productRef, { stock: stockResultante, stock_vendido: stockVendidoPrevio + cantidad });
+        // PROBLEMA ESTRUCTURAL corregido acá: hasta ahora una venta manual
+        // SIEMPRE descontaba de p.stock (el campo plano), sin importar si
+        // el producto tenía variantes — y un producto con variantes no usa
+        // p.stock para nada (siempre queda en 0, ver pmTabInventario). El
+        // resultado real: registrar la venta de una variante específica
+        // (ej. "vendí una blusa talla M negra en persona") guardaba el
+        // documento de venta pero NUNCA descontaba esa unidad del stock de
+        // la variante — el sitio público seguía mostrándola disponible y
+        // podía sobrevenderse en línea. Ahora, si viene variantId, se
+        // descuenta de esa variante puntual dentro de "variantes".
+        if (variantId) {
+          const variantes = p.variantes || [];
+          const idx = variantes.findIndex((v) => v.id === variantId);
+          if (idx !== -1) {
+            const v = variantes[idx];
+            const disponible = v.stock || 0;
+            if (cantidad > disponible) stockInsuficiente = true;
+            stockResultante = Math.max(0, disponible - cantidad);
+            const nuevasVariantes = variantes.map((x, i) => i === idx ? { ...x, stock: stockResultante, stock_vendido: (x.stock_vendido || 0) + cantidad } : x);
+            tx.update(productRef, { variantes: nuevasVariantes });
+          }
+        } else {
+          const disponible = p.stock || 0;
+          if (cantidad > disponible) stockInsuficiente = true;
+          stockResultante = Math.max(0, disponible - cantidad);
+          const stockVendidoPrevio = p.stock_vendido || 0;
+          tx.update(productRef, { stock: stockResultante, stock_vendido: stockVendidoPrevio + cantidad });
+        }
       }
     }
     tx.set(saleRef, saleData);
     if (productRef && stockResultante !== null) {
       tx.set(stockMovRef, {
-        product_id: productId, variant_id: null, warehouse_id: DEFAULT_WAREHOUSE_ID,
+        product_id: productId, variant_id: variantId || null, warehouse_id: DEFAULT_WAREHOUSE_ID,
         tipo: "venta", cantidad: -cantidad, stock_resultante: stockResultante, referencia_id: saleRef.id,
         motivo: "", usuario: currentUser?.email || "sistema", fecha: nowISO(),
       });
@@ -1063,8 +1152,10 @@ async function venderProductoTransaccion({ productId, cantidad, saleData }) {
 /* Suma stock (compra que repone inventario, o devolución que lo regresa) y
    crea el documento correspondiente + su kardex en la misma transacción.
    Es la misma idea que venderProductoTransaccion pero sumando en vez de
-   restando — se usa desde savePurchase() y saveReturn(). */
-async function sumarStockTransaccion({ productId, cantidad, tipo, coleccion, docData, motivo }) {
+   restando — se usa desde savePurchase() y saveReturn(). Mismo problema
+   estructural corregido: ahora acepta variantId para reponer stock de una
+   variante puntual en vez de siempre tocar el campo plano p.stock. */
+async function sumarStockTransaccion({ productId, variantId, cantidad, tipo, coleccion, docData, motivo }) {
   const productRef = productId ? db.collection("products").doc(productId) : null;
   const docRef = db.collection(coleccion).doc();
   const stockMovRef = db.collection("stock_movements").doc();
@@ -1074,20 +1165,92 @@ async function sumarStockTransaccion({ productId, cantidad, tipo, coleccion, doc
       const snap = await tx.get(productRef);
       if (snap.exists) {
         const p = snap.data();
-        stockResultante = (p.stock || 0) + cantidad;
-        tx.update(productRef, { stock: stockResultante });
+        if (variantId) {
+          const variantes = p.variantes || [];
+          const idx = variantes.findIndex((v) => v.id === variantId);
+          if (idx !== -1) {
+            const v = variantes[idx];
+            stockResultante = (v.stock || 0) + cantidad;
+            const nuevasVariantes = variantes.map((x, i) => i === idx ? { ...x, stock: stockResultante } : x);
+            tx.update(productRef, { variantes: nuevasVariantes });
+          }
+        } else {
+          stockResultante = (p.stock || 0) + cantidad;
+          tx.update(productRef, { stock: stockResultante });
+        }
       }
     }
     tx.set(docRef, docData);
     if (productRef && stockResultante !== null) {
       tx.set(stockMovRef, {
-        product_id: productId, variant_id: null, warehouse_id: DEFAULT_WAREHOUSE_ID,
+        product_id: productId, variant_id: variantId || null, warehouse_id: DEFAULT_WAREHOUSE_ID,
         tipo, cantidad, stock_resultante: stockResultante, referencia_id: docRef.id,
         motivo: motivo || "", usuario: currentUser?.email || "sistema", fecha: nowISO(),
       });
     }
   });
   return { id: docRef.id };
+}
+/* Reconcilia el arreglo "variantes" al guardar el formulario de producto.
+   PROBLEMA DE RAÍZ que corrige: el formulario carga una copia de
+   "variantes" en memoria al abrirse, y hasta ahora guardarlo escribía esa
+   copia completa tal cual — incluido stock_reservado, que el admin nunca
+   edita a mano. Si un cliente reservaba (o el admin entregaba/cancelaba)
+   una variante de ESE MISMO producto mientras el formulario seguía
+   abierto, guardar el formulario revertía silenciosamente esa reserva o
+   entrega, sin ningún error visible. Cuanto más tiempo quede el formulario
+   abierto (foto, atributos, SEO...), más ancha la ventana de la carrera.
+   La corrección: nunca escribir "variantes" como parte del guardado
+   general del producto (crudUpdate ya no incluye esa clave — un
+   update() parcial de Firestore deja el campo intacto si no se menciona).
+   En su lugar, esta función SOLO se encarga de variantes, dentro de una
+   transacción que relee el servidor real y por cada variante:
+   - toma del admin los campos que sí edita a mano (sku, código de barras,
+     precio, peso, estado, combinación);
+   - conserva stock_reservado del servidor SIEMPRE (nunca es editable en el
+     formulario, así que el valor guardado nunca puede ser el del admin);
+   - conserva el stock del servidor salvo que el admin realmente haya
+     tecleado un valor distinto al que tenía cuando abrió el formulario
+     (comparado contra el snapshot original, no contra el valor por
+     defecto), para no pisar una entrega/cancelación concurrente con un
+     número que el admin ni siquiera tocó.
+   Si el admin eliminó (en el formulario) una variante que en el servidor
+   real todavía tiene stock_reservado > 0, se bloquea con un error claro en
+   vez de borrar en silencio una reserva de cliente en curso. */
+async function mergeAndSaveVariantesTransaccion(productId, editedVariantes, originalSnapshot) {
+  const productRef = db.collection("products").doc(productId);
+  const cambiosStockManual = [];
+  const merged = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(productRef);
+    if (!snap.exists) throw new Error("PRODUCTO_NO_EXISTE");
+    const serverVariantes = snap.data().variantes || [];
+    const serverById = new Map(serverVariantes.map((v) => [v.id, v]));
+    const originalById = new Map(originalSnapshot.map((v) => [v.id, v]));
+    const editedIds = new Set(editedVariantes.map((v) => v.id));
+    const bloqueadas = originalSnapshot
+      .filter((orig) => !editedIds.has(orig.id))
+      .map((orig) => serverById.get(orig.id))
+      .filter((serverV) => serverV && (serverV.stock_reservado || 0) > 0);
+    if (bloqueadas.length) {
+      const err = new Error("VARIANTES_CON_RESERVA_PENDIENTE");
+      err.variantes = bloqueadas;
+      throw err;
+    }
+    const nuevasVariantes = editedVariantes.map((ev) => {
+      const serverV = serverById.get(ev.id);
+      if (!serverV) return { ...ev, stock_reservado: ev.stock_reservado || 0 };
+      const orig = originalById.get(ev.id);
+      const stockTecleadoPorAdmin = orig ? Number(ev.stock) !== Number(orig.stock) : true;
+      const stockFinal = stockTecleadoPorAdmin ? (parseInt(ev.stock) || 0) : (serverV.stock || 0);
+      if (stockTecleadoPorAdmin && stockFinal !== (serverV.stock || 0)) {
+        cambiosStockManual.push({ variantId: ev.id, sku: ev.sku, anterior: serverV.stock || 0, nuevo: stockFinal });
+      }
+      return { ...ev, stock: stockFinal, stock_reservado: serverV.stock_reservado || 0 };
+    });
+    tx.update(productRef, { variantes: nuevasVariantes });
+    return nuevasVariantes;
+  });
+  return { merged, cambiosStockManual };
 }
 /* ---------------- HISTORIAL DE AUDITORÍA — snapshot del producto en cada guardado ---------------- */
 async function logProductHistory(productId, accion, data) {
@@ -1125,6 +1288,7 @@ let authReady = false;
 auth.onAuthStateChanged((user) => {
   currentUser = user;
   authReady = true;
+  if (window._bootDone) attachRealtimeListeners();
   if (user) { ensureSeedData().then(migrateAttributesAndCategories).then(ensureDefaultWarehouse).catch((e) => console.error("ensureSeedData", e)); }
   if (window._bootDone) renderRoute();
 });
@@ -1158,6 +1322,7 @@ function renderRoute() {
   if (isAdminRoute(hash)) {
     if (!authReady) { app.innerHTML = `<div class="container" style="padding:80px 20px;text-align:center;"><p class="muted">Cargando…</p></div>`; return; }
     if (!currentUser) { app.innerHTML = adminLoginView(); afterRender(); return; }
+    liberarReservasExpiradas();
   }
   const match = matchRoute(hash);
   if (!match) { app.innerHTML = notFoundView(); return; }
@@ -1240,8 +1405,26 @@ async function adminLogin(e) {
     renderRoute();
   }
 }
+// Colecciones legibles públicamente — el resto solo existe en memoria
+// mientras hay sesión de admin. Se limpian al cerrar sesión para que datos
+// sensibles (ventas, reservas, comprobantes, clientes...) no queden dando
+// vueltas en la memoria del navegador — importante en un equipo compartido,
+// donde alguien podría usar el botón "atrás" después de que el admin cierre
+// sesión.
+const PUBLIC_COLLECTIONS = new Set(["categories", "products", "delivery_zones", "attributes"]);
 function adminLogout() {
-  auth.signOut().then(() => navigate("/"));
+  auth.signOut().then(() => {
+    COLLECTIONS.forEach((name) => { if (!PUBLIC_COLLECTIONS.has(name)) DB[name] = []; });
+    navigate("/");
+  });
+}
+function copyMyUid() {
+  const uidVal = currentUser?.uid || "";
+  if (!uidVal) return;
+  navigator.clipboard?.writeText(uidVal).then(
+    () => toast("UID copiado. Pégalo como ID del documento en Firestore, colección admins/"),
+    () => toast(uidVal)
+  );
 }
 route("/admin/login", () => adminLoginView());
 
@@ -1817,6 +2000,7 @@ function adminLayout(activeHref, eyebrow, title, content) {
       </nav>
       <a href="#/" class="admin-logout" style="display:block;">Salir al catálogo</a>
       <div style="padding:0 16px 10px;font-size:11px;color:var(--muted);word-break:break-all;">${esc(currentUser?.email || "")}</div>
+      <div style="padding:0 16px 10px;font-size:11px;color:var(--muted);word-break:break-all;cursor:pointer;" title="Clic para copiar tu UID (necesario para la colección admins/ en Firestore)" onclick="copyMyUid()">UID: ${esc(currentUser?.uid || "")} <span style="text-decoration:underline;">copiar</span></div>
       <button class="admin-logout" style="display:block;width:100%;" onclick="adminLogout()">Cerrar sesión</button>
     </aside>
     <div style="flex:1;min-width:0;">
@@ -1978,6 +2162,14 @@ function openProductModal(id) {
     atributos: legacyAtributosFallback(p),
     variante_atributos: p ? [...(p.variante_atributos || [])] : [],
     variantes: p ? (p.variantes || []).map((v) => ({ ...v, combinacion: { ...v.combinacion } })) : [],
+    // Copia congelada de cómo estaban las variantes al abrir el formulario,
+    // solo para comparar en pmSaveVariantesReconciliadas() si el admin
+    // realmente tecleó un stock distinto — nunca se muestra ni se edita.
+    __variantesOriginal: p ? (p.variantes || []).map((v) => ({ ...v })) : [],
+    // Se llena de forma asíncrona por loadProductHistory() — ver COLLECTIONS,
+    // product_history ya no se sincroniza completa en memoria para todos los
+    // productos a la vez.
+    historial: [], historialCargando: !!id,
     documentos: p ? [...(p.documentos || [])] : [],
     preciosVolumen: p ? (p.precios_por_volumen || []).map((x) => ({ ...x })) : [],
     etiquetas: p ? [...(p.etiquetas || [])] : [],
@@ -2004,6 +2196,24 @@ function openProductModal(id) {
   };
   renderProductModal();
   pmMaybeRestoreDraft();
+  if (id) loadProductHistory(id);
+}
+/* Trae el historial de auditoría de UN producto puntual, bajo demanda —
+   ver la nota en COLLECTIONS sobre por qué product_history ya no se
+   sincroniza entera para todos los productos. Si el admin ya cerró el
+   formulario o abrió otro producto antes de que responda Firestore, el
+   resultado se descarta en vez de pisar el estado de otro producto. */
+async function loadProductHistory(productId) {
+  try {
+    const snap = await db.collection("product_history").where("product_id", "==", productId).limit(200).get();
+    if (!productModalState || productModalState.editingId !== productId) return;
+    productModalState.historial = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+    productModalState.historialCargando = false;
+    if (productModalState.activeTab === "historial") renderProductModal();
+  } catch (e) {
+    console.error("loadProductHistory", e);
+    if (productModalState && productModalState.editingId === productId) productModalState.historialCargando = false;
+  }
 }
 function pmField(key, value) { productModalState[key] = value; pmScheduleAutosave(); }
 function pmSetTab(key) { syncProductFieldsFromDOM(); productModalState.activeTab = key; renderProductModal(); }
@@ -2571,7 +2781,8 @@ function pmTabHistorial(p) {
   const ultimaVenta = [...ventas].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0];
   const compras = DB.purchases.filter((c) => c.product_id === p.id);
   const ultimaCompra = [...compras].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0];
-  const historial = DB.product_history.filter((h) => h.product_id === p.id).sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+  const st = productModalState;
+  const historial = st?.historial || [];
   return `
     <div class="grid grid-2 gap-3 mb-4">
       <div class="card" style="padding:10px;"><p class="muted" style="font-size:11px;">Unidades vendidas</p><p style="font-weight:700;">${totalVendido}</p></div>
@@ -2585,7 +2796,7 @@ function pmTabHistorial(p) {
     <p style="font-size:12px;margin-bottom:10px;"><b>Última edición:</b> ${esc(p.actualizado_por || "—")} ${p.actualizado_en ? `— ${tiempoRelativo(p.actualizado_en)}` : ""}</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th></tr></thead>
-      <tbody>${historial.length ? historial.slice(0, 20).map((h) => `<tr><td>${tiempoRelativo(h.fecha)}</td><td style="text-transform:capitalize;">${esc(h.accion)}</td><td>${esc(h.usuario)}</td></tr>`).join("") : `<tr><td colspan="3" class="muted text-center" style="padding:16px;">Sin historial todavía.</td></tr>`}</tbody>
+      <tbody>${st?.historialCargando ? `<tr><td colspan="3" class="muted text-center" style="padding:16px;">Cargando historial…</td></tr>` : historial.length ? historial.slice(0, 20).map((h) => `<tr><td>${tiempoRelativo(h.fecha)}</td><td style="text-transform:capitalize;">${esc(h.accion)}</td><td>${esc(h.usuario)}</td></tr>`).join("") : `<tr><td colspan="3" class="muted text-center" style="padding:16px;">Sin historial todavía.</td></tr>`}</tbody>
     </table></div>`;
 }
 function pmAddVolumen() { productModalState.preciosVolumen.push({ cantidad_minima: "", precio: "" }); renderProductModal(); }
@@ -2711,11 +2922,34 @@ async function saveProduct() {
     meta_titulo: st.meta_titulo || null, meta_descripcion: st.meta_descripcion || null, keywords: [...st.keywords],
     documentos: st.documentos.map((d) => ({ ...d })), modelo_3d_url: st.modelo_3d_url || null,
     atributos: { ...st.atributos }, media: mediaMigrada,
-    variante_atributos: [...st.variante_atributos], variantes: st.variantes.map((v) => ({ ...v })),
+    // "variantes" NO va aquí a propósito — ver mergeAndSaveVariantesTransaccion.
+    // Un crudUpdate() que omite esta clave hace un update() parcial de
+    // Firestore, que deja el arreglo intacto en vez de pisarlo.
+    variante_atributos: [...st.variante_atributos],
     actualizado_por: currentUser?.email || "sistema", actualizado_en: nowISO(),
   };
   try {
     if (st.editingId) {
+      let variantesFinal = st.variantes.map((v) => ({ ...v }));
+      if (st.variantes.length || st.__variantesOriginal.length) {
+        try {
+          const r = await mergeAndSaveVariantesTransaccion(st.editingId, st.variantes.map((v) => ({ ...v })), st.__variantesOriginal);
+          variantesFinal = r.merged;
+          r.cambiosStockManual.forEach((c) => logStockMovement({
+            productId: st.editingId, variantId: c.variantId, tipo: "ajuste_manual",
+            cantidad: c.nuevo - c.anterior, stockResultante: c.nuevo,
+            motivo: `Edición manual del stock de la variante ${c.sku || c.variantId} desde el formulario de producto`,
+          }));
+        } catch (err) {
+          if (err.message === "VARIANTES_CON_RESERVA_PENDIENTE") {
+            const v0 = err.variantes[0];
+            toast(`No se puede quitar la variante "${v0.sku || v0.id}": tiene ${v0.stock_reservado} unidad(es) reservada(s) por un cliente ahora mismo. Resolvé esa reserva antes de eliminarla.`);
+            if (btn) { btn.disabled = false; btn.textContent = btnTextoOriginal; }
+            return;
+          }
+          throw err;
+        }
+      }
       await crudUpdate("products", st.editingId, data);
       if (nuevoStock !== stockAnterior) {
         logStockMovement({
@@ -2723,19 +2957,21 @@ async function saveProduct() {
           stockResultante: nuevoStock, motivo: "Edición manual del stock desde el formulario de producto",
         });
       }
-      logProductHistory(st.editingId, "actualizado", data);
+      logProductHistory(st.editingId, "actualizado", { ...data, variantes: variantesFinal });
       toast("Producto guardado");
     } else {
       const sku = formatSku(await nextSkuNumber());
       const slug = slugify(nombre) + "-" + Date.now().toString(36).slice(-4);
+      const variantesIniciales = st.variantes.map((v) => ({ ...v, stock_reservado: 0 }));
       const nuevo = await crudInsert("products", {
         ...data, sku, slug, estado: "disponible", activo: true, stock_reservado: 0, stock_vendido: 0,
+        variantes: variantesIniciales,
         creado_por: currentUser?.email || "sistema", creado_en: nowISO(),
       });
       if (nuevoStock > 0) {
         logStockMovement({ productId: nuevo.id, tipo: "ajuste_manual", cantidad: nuevoStock, stockResultante: nuevoStock, motivo: "Stock inicial al crear el producto" });
       }
-      logProductHistory(nuevo.id, "creado", data);
+      logProductHistory(nuevo.id, "creado", { ...data, variantes: variantesIniciales });
       toast("Producto creado");
     }
     pmClearDraft();
@@ -2757,6 +2993,19 @@ function checkDuplicateProduct({ nombre, codigoBarras, sku, excludeId, variantSk
   return null;
 }
 function deleteProduct(id) {
+  // Antes se podía borrar un producto con una reserva de cliente todavía
+  // activa (pendiente de pago o de entrega) sin ningún aviso — la reserva
+  // quedaba huérfana, apuntando a un product_id que ya no existe.
+  // resolverReservaTransaccion() no se rompe con eso (revisa si el
+  // producto sigue existiendo antes de tocar stock), pero el cliente se
+  // queda esperando por algo que el admin borró sin saber que había un
+  // pedido en curso. Se bloquea con la cuenta de reservas activas en vez
+  // de dejarlo pasar en silencio.
+  const activas = DB.reservations.filter((r) => r.product_id === id && !RESERVA_ESTADOS_FINALES.includes(r.estado));
+  if (activas.length) {
+    toast(`No se puede eliminar: hay ${activas.length} reserva(s) activa(s) de clientes para este producto. Entregalas o cancelalas primero desde Reservas.`);
+    return;
+  }
   if (!confirmar("¿Eliminar este producto?")) return;
   const p = findById("products", id);
   (p?.media || []).forEach((m) => { tryDeleteStorageFile(m.url); if (m.thumbUrl) tryDeleteStorageFile(m.thumbUrl); });
@@ -2921,6 +3170,18 @@ function saveCategoryName(id) {
 }
 function toggleCategoria(id) { const c = findById("categories", id); crudUpdate("categories", id, { activa: !c.activa }); renderRoute(); }
 function deleteCategoria(id) {
+  // Antes esto borraba la categoría sin más — cualquier producto que
+  // siguiera apuntando a category_id quedaba huérfano: la pestaña
+  // Atributos de su formulario depende de categoria?.atributos_config para
+  // saber qué campos mostrar, así que un producto en una categoría borrada
+  // pierde silenciosamente sus campos de atributo al editarlo. Se bloquea
+  // en vez de dejar que pase, con la cuenta exacta de productos afectados,
+  // en vez de un "no se puede" genérico.
+  const enUso = DB.products.filter((p) => p.category_id === id);
+  if (enUso.length) {
+    toast(`No se puede eliminar: ${enUso.length} producto(s) todavía están en esta categoría. Reasigná o eliminá esos productos primero.`);
+    return;
+  }
   if (!confirmar("¿Eliminar esta categoría?")) return;
   crudDelete("categories", id); toast("Categoría eliminada"); renderRoute();
 }
@@ -3054,6 +3315,14 @@ function saveWarehouse(id) {
 }
 function toggleWarehouse(id) { const w = findById("warehouses", id); crudUpdate("warehouses", id, { activa: !w.activa }); renderRoute(); }
 function deleteWarehouse(id) {
+  // Todo el sistema de inventario (stock_por_bodega, el kardex) da por
+  // hecho que DEFAULT_WAREHOUSE_ID siempre existe — es la única bodega que
+  // realmente se usa hoy (ver plan: "una sola bodega por ahora"). Borrarla
+  // no corrompería stock existente (no hay una relación de llave foránea
+  // real, es solo una convención de nombre), pero sí dejaría el kardex y
+  // el inventario apuntando a una bodega que ya no aparece en la lista —
+  // confuso sin ningún beneficio real, así que se bloquea.
+  if (id === DEFAULT_WAREHOUSE_ID) { toast("No se puede eliminar la bodega principal — es la que usa todo el sistema de inventario."); return; }
   if (!confirmar("¿Eliminar esta bodega?")) return;
   crudDelete("warehouses", id); toast("Bodega eliminada"); renderRoute();
 }
@@ -3166,8 +3435,9 @@ function openSaleModal() {
   openModal(`
     <h3>Nueva venta</h3>
     <div class="field"><label class="flabel">Producto</label>
-      <select id="s_producto" onchange="svUpdateTotal()">${products.map((p) => `<option value="${p.id}" data-precio="${p.precio_venta}" data-costo="${p.costo_compra}">${esc(p.nombre)}</option>`).join("")}</select>
+      <select id="s_producto" onchange="svProductoChanged()">${products.map((p) => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("")}</select>
     </div>
+    <div id="s_varianteField"></div>
     <div class="field-row">
       <div class="field"><label class="flabel">Cliente</label><input id="s_cliente"></div>
       <div class="field"><label class="flabel">Vendedor</label><input id="s_vendedor"></div>
@@ -3182,10 +3452,46 @@ function openSaleModal() {
       <button class="btn btn-rose" onclick="saveSale()">Registrar venta</button>
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
     </div>`);
+  svRenderVarianteField();
+}
+/* Antes, un producto CON variantes no tenía forma de elegir cuál se vendió
+   — la venta manual siempre restaba del campo plano p.stock, que en un
+   producto con variantes vale 0 y no representa nada real (ver
+   venderProductoTransaccion). Este selector aparece solo si el producto
+   elegido tiene variantes, y obliga a elegir una antes de poder vender. */
+function svRenderVarianteField() {
+  const container = document.getElementById("s_varianteField");
+  if (!container) return;
+  const product = findById("products", document.getElementById("s_producto").value);
+  const variantes = product?.variantes || [];
+  if (!variantes.length) { container.innerHTML = ""; svUpdateTotal(); return; }
+  container.innerHTML = `
+    <div class="field"><label class="flabel">Variante</label>
+      <select id="s_variante" onchange="svUpdateTotal()">
+        ${variantes.map((v) => `<option value="${v.id}">${esc(Object.values(v.combinacion || {}).join(" / "))} — stock actual: ${v.stock ?? 0}</option>`).join("")}
+      </select>
+    </div>`;
+  svUpdateTotal();
+}
+function svProductoChanged() { svRenderVarianteField(); }
+function svSelectedVariante() {
+  const varSel = document.getElementById("s_variante");
+  if (!varSel) return null;
+  const product = findById("products", document.getElementById("s_producto").value);
+  return (product?.variantes || []).find((v) => v.id === varSel.value) || null;
 }
 function svUpdateTotal() {
   const sel = document.getElementById("s_producto");
-  document.getElementById("s_precio").value = document.getElementById("s_precio").value || sel.selectedOptions[0].dataset.precio;
+  const product = findById("products", sel.value);
+  const variante = svSelectedVariante();
+  // El precio se vuelve a calcular en cada cambio de producto/variante en
+  // vez de solo "si está vacío" — antes, cambiar de producto no actualizaba
+  // el precio precargado porque el campo ya tenía un valor por defecto
+  // desde el primer render, así que la comprobación "valor || ..." nunca
+  // se disparaba (el precio del primer producto quedaba pegado aunque se
+  // eligiera otro distinto).
+  const precioSugerido = variante ? (variante.precio_venta ?? product?.precio_venta ?? 0) : (product?.precio_venta ?? 0);
+  document.getElementById("s_precio").value = precioSugerido;
   const cant = parseFloat(document.getElementById("s_cantidad").value) || 0;
   const precio = parseFloat(document.getElementById("s_precio").value) || 0;
   const desc = parseFloat(document.getElementById("s_descuento").value) || 0;
@@ -3194,6 +3500,8 @@ function svUpdateTotal() {
 async function saveSale() {
   const sel = document.getElementById("s_producto");
   const product = findById("products", sel.value);
+  const variante = svSelectedVariante();
+  if (product?.variantes?.length && !variante) { toast("Elegí una variante para este producto"); return; }
   const cantidad = parseFloat(document.getElementById("s_cantidad").value) || 0;
   const precio = parseFloat(document.getElementById("s_precio").value) || 0;
   const descuento = parseFloat(document.getElementById("s_descuento").value) || 0;
@@ -3205,10 +3513,12 @@ async function saveSale() {
   if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
   try {
     const { stockInsuficiente } = await venderProductoTransaccion({
-      productId: product?.id, cantidad,
+      productId: product?.id, variantId: variante?.id || null, cantidad,
       saleData: {
         fecha: todayStr(), cliente_nombre: document.getElementById("s_cliente").value || null, product_id: product?.id,
-        producto_nombre: product?.nombre, cantidad, precio_unitario: precio, descuento, total, utilidad,
+        producto_nombre: product?.nombre, variant_id: variante?.id || null, variant_sku: variante?.sku || null,
+        variant_combinacion: variante?.combinacion || null,
+        cantidad, precio_unitario: precio, descuento, total, utilidad,
         canal: document.getElementById("s_canal").value, metodo_pago: document.getElementById("s_metodo").value,
         vendedor: document.getElementById("s_vendedor").value || null,
       },
@@ -3240,7 +3550,7 @@ route("/admin/reservas", () => {
       <td>${esc(r.cliente_nombre)}</td><td>${esc(r.producto_nombre)}</td><td>${money(r.total_a_pagar)}</td>
       <td><span class="badge ${ESTADO_RESERVA_BADGE[r.estado] || "badge-low"}">${esc((r.estado || "").replace(/_/g, " "))}</span></td>
       <td style="font-size:12px;">${r.tipo_entrega === "inmediato" ? "Inmediata" : horasRestantes(r.expira_at)}</td>
-      <td>${r.comprobante_url ? `<button class="btn-link" onclick="verComprobante('${r.id}')">Ver comprobante</button>` : `<span class="muted" style="font-size:12px;">Sin comprobante</span>`}</td>
+      <td><button class="btn-link" onclick="verDetalleReserva('${r.id}')">Ver detalle</button></td>
       <td class="row-actions">
         ${RESERVA_ESTADOS_FINALES.includes(r.estado) ? "" : `
         <button class="btn-link" style="margin-right:10px;" onclick="marcarReservaEntregada('${r.id}')">Marcar entregado</button>
@@ -3249,33 +3559,51 @@ route("/admin/reservas", () => {
     </tr>`).join("");
   return adminLayout("#/admin/reservas", "Órdenes en vivo", "Centro de reservas", `
     <div class="table-wrap"><table>
-      <thead><tr><th>Orden</th><th>Cliente</th><th>Producto</th><th>Total</th><th>Estado</th><th>Tiempo restante</th><th>Comprobante</th><th></th></tr></thead>
+      <thead><tr><th>Orden</th><th>Cliente</th><th>Producto</th><th>Total</th><th>Estado</th><th>Tiempo restante</th><th></th><th></th></tr></thead>
       <tbody>${rows || `<tr class="empty-row"><td colspan="8">Sin reservas todavía.</td></tr>`}</tbody>
     </table></div>
   `);
 });
-/* Visor de comprobante — funciona tanto con comprobantes nuevos (URL de
-   Firebase Storage) como con los que ya existían antes del commit 2a31701
-   (todavía embebidos como data: URL en el propio documento). Si la imagen
-   no carga (enlace vencido, archivo borrado, PDF), lo dice explícitamente
-   en vez de dejar un cuadro roto. Solo es alcanzable desde /admin/reservas,
-   que ya requiere sesión de administrador — no expone nada a un visitante. */
-function verComprobante(reservationId) {
+/* Detalle completo de una reserva — antes esta ventana solo mostraba el
+   comprobante (y ni siquiera eso si no había uno adjunto). El resto de los
+   datos que el cliente sí entrega en el checkout — WhatsApp, correo,
+   dirección — no se veían en ningún lugar del panel; solo llegaban por el
+   correo de aviso a EmailJS, así que atender un pedido dependía de revisar
+   el correo en vez del propio sistema. Ahora el panel muestra todo lo que
+   hace falta para contactar y entregar, con el comprobante (si existe)
+   como una sección más — funciona con comprobantes nuevos (URL de Firebase
+   Storage) y con los que ya existían antes del commit 2a31701 (todavía
+   embebidos como data: URL). Solo es alcanzable desde /admin/reservas, que
+   ya requiere sesión de administrador — no expone nada a un visitante. */
+function verDetalleReserva(reservationId) {
   const r = findById("reservations", reservationId);
   if (!r) return;
-  if (!r.comprobante_url) {
-    openModal(`<h3>Comprobante</h3><p class="muted">Esta reserva no tiene comprobante adjunto.</p><div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>`);
-    return;
-  }
+  const filas = [
+    ["Cliente", esc(r.cliente_nombre || "—")],
+    ["WhatsApp", esc(r.cliente_whatsapp || "—")],
+    ["Correo", esc(r.cliente_correo || "—")],
+    ["Dirección", esc(r.direccion || "—")],
+    ["Producto", esc(r.producto_nombre || "—") + (r.variant_combinacion ? ` (${esc(Object.values(r.variant_combinacion).join(" / "))})` : "")],
+    ["Cantidad", esc(String(r.cantidad ?? 1))],
+    ["Zona de entrega", esc(r.zona_nombre || "—")],
+    ["Fecha de entrega", esc(r.fecha_entrega || (r.tipo_entrega === "inmediato" ? "Inmediata" : "—"))],
+    ["Método de pago", esc(METODO_PAGO_TEXTOS[r.metodo_pago] || r.metodo_pago || "—")],
+    ["Total a pagar", money(r.total_a_pagar)],
+  ];
   const url = r.comprobante_url;
-  const esPdf = /\.pdf($|\?)/i.test(url) || url.startsWith("data:application/pdf");
+  const esPdf = url && (/\.pdf($|\?)/i.test(url) || url.startsWith("data:application/pdf"));
   openModal(`
-    <h3>Comprobante — ${esc(r.numero_orden || "")}</h3>
-    <p class="muted" style="font-size:12px;margin-bottom:10px;">${esc(r.cliente_nombre || "")} · ${money(r.total_a_pagar)}</p>
+    <h3>Detalle — ${esc(r.numero_orden || "")}</h3>
+    <div class="surface2" style="margin-bottom:14px;">
+      ${filas.map(([lbl, val]) => `<div class="flex justify-between" style="padding:4px 0;font-size:13px;"><span class="muted">${lbl}</span><span style="font-weight:700;text-align:right;">${val}</span></div>`).join("")}
+    </div>
+    <p class="flabel" style="margin-bottom:8px;">Comprobante</p>
     <div id="comprobante_preview" style="text-align:center;">
-      ${esPdf
-        ? `<a href="${esc(url)}" target="_blank" rel="noreferrer" class="btn btn-navy">Abrir PDF en pestaña nueva</a>`
-        : `<img src="${esc(url)}" alt="Comprobante de pago de ${esc(r.cliente_nombre || "")}" style="max-width:100%;max-height:60vh;border-radius:10px;border:1px solid var(--border);" onerror="document.getElementById('comprobante_preview').innerHTML='<p style=&quot;color:var(--danger);&quot;>No se pudo cargar el comprobante (el enlace puede haber vencido o el archivo ya no existe).</p>'">`}
+      ${!url
+        ? `<p class="muted" style="font-size:13px;">Esta reserva no tiene comprobante adjunto.</p>`
+        : esPdf
+          ? `<a href="${esc(url)}" target="_blank" rel="noreferrer" class="btn btn-navy">Abrir PDF en pestaña nueva</a>`
+          : `<img src="${esc(url)}" alt="Comprobante de pago de ${esc(r.cliente_nombre || "")}" style="max-width:100%;max-height:60vh;border-radius:10px;border:1px solid var(--border);" onerror="document.getElementById('comprobante_preview').innerHTML='<p style=&quot;color:var(--danger);&quot;>No se pudo cargar el comprobante (el enlace puede haber vencido o el archivo ya no existe).</p>'">`}
     </div>
     <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>
   `);
@@ -3345,8 +3673,11 @@ function openPurchaseModal() {
       <div class="field"><label class="flabel">Cantidad</label><input id="c_cantidad" type="number" value="1" oninput="cvUpdateTotal()"></div>
       <div class="field"><label class="flabel">Costo unitario</label><input id="c_costoUnitario" type="number" step="0.01" oninput="cvUpdateTotal()"></div>
     </div>
-    <div class="field flex items-center gap-2" style="flex-direction:row;"><input type="checkbox" id="c_afecta" onchange="document.getElementById('c_productoField').classList.toggle('hidden', !this.checked)"><label style="margin:0;font-size:13px;">Esta compra afecta el inventario</label></div>
-    <div class="field hidden" id="c_productoField"><label class="flabel">Producto</label><select id="c_producto">${DB.products.map((p) => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("")}</select></div>
+    <div class="field flex items-center gap-2" style="flex-direction:row;"><input type="checkbox" id="c_afecta" onchange="document.getElementById('c_productoField').classList.toggle('hidden', !this.checked); cvRenderVarianteField();"><label style="margin:0;font-size:13px;">Esta compra afecta el inventario</label></div>
+    <div class="field hidden" id="c_productoField">
+      <label class="flabel">Producto</label><select id="c_producto" onchange="cvRenderVarianteField()">${DB.products.map((p) => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("")}</select>
+      <div id="c_varianteField" class="mt-2"></div>
+    </div>
     <div class="surface2 flex justify-between" style="font-weight:800;"><span>Costo total</span><span class="price" id="c_totalPreview">$0.00</span></div>
     <div class="modal-actions">
       <button class="btn btn-navy" onclick="savePurchase()">Guardar</button>
@@ -3357,25 +3688,48 @@ function cvUpdateTotal() {
   const q = parseFloat(document.getElementById("c_cantidad").value) || 0, u = parseFloat(document.getElementById("c_costoUnitario").value) || 0;
   document.getElementById("c_totalPreview").textContent = money(q * u);
 }
+/* Mismo problema que en Ventas: reponer stock por una compra siempre subía
+   el campo plano p.stock, que no representa nada en un producto con
+   variantes. Este selector solo aparece con "afecta el inventario" activo
+   y un producto con variantes elegido. */
+function cvRenderVarianteField() {
+  const container = document.getElementById("c_varianteField");
+  if (!container) return;
+  if (!document.getElementById("c_afecta").checked) { container.innerHTML = ""; return; }
+  const product = findById("products", document.getElementById("c_producto").value);
+  const variantes = product?.variantes || [];
+  if (!variantes.length) { container.innerHTML = ""; return; }
+  container.innerHTML = `
+    <label class="flabel">Variante</label>
+    <select id="c_variante">${variantes.map((v) => `<option value="${v.id}">${esc(Object.values(v.combinacion || {}).join(" / "))} — stock actual: ${v.stock ?? 0}</option>`).join("")}</select>`;
+}
 async function savePurchase() {
   const cantidad = parseFloat(document.getElementById("c_cantidad").value) || 0;
   const costoUnitario = parseFloat(document.getElementById("c_costoUnitario").value) || 0;
   const afecta = document.getElementById("c_afecta").checked;
   const productId = afecta ? document.getElementById("c_producto").value : null;
+  const product = productId ? findById("products", productId) : null;
+  const variantSel = document.getElementById("c_variante");
+  const variantId = afecta && product?.variantes?.length && variantSel ? variantSel.value : null;
+  if (afecta && product?.variantes?.length && !variantId) { toast("Elegí una variante para este producto"); return; }
   if (afecta && cantidad <= 0) { toast("La cantidad debe ser mayor a 0"); return; }
+  if (cantidad < 0 || costoUnitario < 0) { toast("La cantidad y el costo no pueden ser negativos"); return; }
   const purchaseData = {
     fecha: todayStr(), tipo: document.getElementById("c_tipo").value, descripcion: document.getElementById("c_descripcion").value,
     proveedor: document.getElementById("c_proveedor").value, cantidad, costo_unitario: costoUnitario, costo_total: cantidad * costoUnitario,
-    afecta_inventario: afecta, product_id: productId,
+    afecta_inventario: afecta, product_id: productId, variant_id: variantId || null,
   };
+  const btn = document.querySelector(".modal .btn-navy");
+  if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
   try {
     if (afecta && productId) {
-      await sumarStockTransaccion({ productId, cantidad, tipo: "compra", coleccion: "purchases", docData: purchaseData });
+      await sumarStockTransaccion({ productId, variantId, cantidad, tipo: "compra", coleccion: "purchases", docData: purchaseData });
     } else {
       await crudInsert("purchases", purchaseData);
     }
     closeModal(); toast("Compra registrada"); renderRoute();
   } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "Guardar"; }
     toast("Error al registrar la compra: " + e.message);
   }
 }
@@ -3412,7 +3766,7 @@ function openExpenseModal() {
 }
 function saveExpense() {
   const monto = parseFloat(document.getElementById("g_monto").value) || 0;
-  if (!monto) { toast("Ingresa un monto"); return; }
+  if (monto <= 0) { toast("Ingresa un monto mayor a 0"); return; }
   crudInsert("expenses", { fecha: todayStr(), categoria: document.getElementById("g_categoria").value, descripcion: document.getElementById("g_descripcion").value, monto, metodo_pago: document.getElementById("g_metodo").value });
   closeModal(); toast("Gasto registrado"); renderRoute();
 }
@@ -3452,11 +3806,14 @@ function openNewZoneModal() {
 function saveNewZone() {
   const nombre = document.getElementById("z_nombre").value.trim();
   if (!nombre) { toast("Escribe un nombre"); return; }
-  crudInsert("delivery_zones", { nombre, costo: parseFloat(document.getElementById("z_costo").value) || 0, tiempo_estimado: document.getElementById("z_tiempo").value, activa: true });
+  const costo = parseFloat(document.getElementById("z_costo").value) || 0;
+  if (costo < 0) { toast("El costo no puede ser negativo"); return; }
+  crudInsert("delivery_zones", { nombre, costo, tiempo_estimado: document.getElementById("z_tiempo").value, activa: true });
   closeModal(); toast("Zona creada"); renderRoute();
 }
 function saveZoneCosto(id) {
   const v = parseFloat(document.getElementById("zone_edit_" + id).value) || 0;
+  if (v < 0) { toast("El costo no puede ser negativo"); return; }
   crudUpdate("delivery_zones", id, { costo: v }); editingZoneId = null; renderRoute();
 }
 function toggleZona(id) { const z = findById("delivery_zones", id); crudUpdate("delivery_zones", id, { activa: !z.activa }); renderRoute(); }
@@ -3509,6 +3866,7 @@ function saveDelivery() {
   const esRecogio = quien === "El cliente recogió el producto";
   const costo = esRecogio ? 0 : parseFloat(document.getElementById("d_costo").value) || 0;
   const cobrado = esRecogio ? 0 : parseFloat(document.getElementById("d_cobrado").value) || 0;
+  if (costo < 0 || cobrado < 0) { toast("El costo y lo cobrado no pueden ser negativos"); return; }
   const repartidor = quien === "Repartidor externo" ? document.getElementById("d_repartidor").value : (quien === "Lo entregué yo" ? "Yo mismo/a" : quien === "Lo entregó un familiar" ? "Familiar" : "Cliente (recogió en tienda)");
   crudInsert("deliveries", { fecha: todayStr(), quien_entrega: quien, repartidor, zona_o_punto: document.getElementById("d_zona").value, costo, cobrado, utilidad: cobrado - costo, estado: "Pendiente" });
   closeModal(); toast("Entrega guardada"); renderRoute();
@@ -3568,15 +3926,18 @@ async function saveReturn() {
   if (cantidad <= 0 || cantidad > sale.cantidad - yaDevuelto) { toast("Cantidad inválida"); return; }
   const motivo = document.getElementById("dv_motivo").value;
   const perUnitTotal = sale.total / sale.cantidad, perUnitUtilidad = sale.utilidad / sale.cantidad;
-  const returnData = { sale_id: sale.id, fecha: todayStr(), producto_nombre: sale.producto_nombre, cliente_nombre: sale.cliente_nombre, cantidad, motivo, monto: cantidad * perUnitTotal, utilidad_impacto: cantidad * perUnitUtilidad };
+  const returnData = { sale_id: sale.id, fecha: todayStr(), producto_nombre: sale.producto_nombre, cliente_nombre: sale.cliente_nombre, variant_id: sale.variant_id || null, cantidad, motivo, monto: cantidad * perUnitTotal, utilidad_impacto: cantidad * perUnitUtilidad };
+  const btn = document.querySelector(".modal .btn-rose");
+  if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
   try {
     if (motivo !== "Producto dañado" && sale.product_id) {
-      await sumarStockTransaccion({ productId: sale.product_id, cantidad, tipo: "devolucion", coleccion: "returns", docData: returnData, motivo });
+      await sumarStockTransaccion({ productId: sale.product_id, variantId: sale.variant_id || null, cantidad, tipo: "devolucion", coleccion: "returns", docData: returnData, motivo });
     } else {
       await crudInsert("returns", returnData);
     }
     closeModal(); toast("Devolución registrada"); renderRoute();
   } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "Registrar devolución"; }
     toast("Error al registrar la devolución: " + e.message);
   }
 }
@@ -3678,6 +4039,7 @@ function savePromo() {
   const product = findById("products", document.getElementById("pm_producto").value);
   const tipo = document.getElementById("pm_tipo").value;
   const precioPromo = calcPrecioPromo(tipo, product.precio_venta, document.getElementById("pm_precioFijo")?.value);
+  if (precioPromo < 0) { toast("El precio de la promoción no puede ser negativo"); return; }
   crudInsert("promotions", { titulo, product_id: product.id, producto_nombre: product.nombre, descuento_tipo: tipo, precio_normal: product.precio_venta, precio_promo: precioPromo, es_perdida: precioPromo < product.costo_compra, activa: true });
   closeModal(); toast("Promoción guardada"); renderRoute();
 }
@@ -4239,8 +4601,11 @@ async function confirmCleanupFakeSeedProducts() {
     await crudDelete("products", known.id);
     const movimientos = DB.stock_movements.filter((m) => m.product_id === known.id);
     for (const m of movimientos) await crudDelete("stock_movements", m.id);
-    const historial = DB.product_history.filter((h) => h.product_id === known.id);
-    for (const h of historial) await crudDelete("product_history", h.id);
+    // product_history ya no se sincroniza completa en memoria (ver
+    // COLLECTIONS) — se consulta directo contra Firestore, acotada a este
+    // producto puntual, igual que hace loadProductHistory().
+    const historialSnap = await db.collection("product_history").where("product_id", "==", known.id).get();
+    for (const doc of historialSnap.docs) await crudDelete("product_history", doc.id);
   }
   closeModal();
   toast(`${eliminables.length} producto(s) de muestra eliminado(s)`);
